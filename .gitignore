@@ -14,3 +14,23 @@ repository/**
 .idea/
 .DS_Store
 Thumbs.db
+# Virtual environment
+.venv/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Environment
+.env
+
+# Logs
+logs/
+*.log
+
+# Databases
+*.db
+*.sqlite3
+
+# VS Code
+.vscode/
