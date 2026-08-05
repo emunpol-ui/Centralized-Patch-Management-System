@@ -5,15 +5,12 @@ Centralizing dependency declarations here (rather than redefining
 ``Depends(...)`` inline in every router) keeps route signatures concise and
 gives every router a single, consistent source for cross-cutting
 dependencies, per SAD Section 5.6 (Dependency Injection).
-
-Additional dependencies (authenticated client agent) will be added here
-in a later ticket (AUTH-002) without requiring changes to this ticket's
-scaffolding.
 """
 
 from __future__ import annotations
 
 import hmac
+import logging
 from datetime import timedelta
 from typing import Annotated
 
@@ -23,7 +20,11 @@ from sqlalchemy.orm import Session
 from backend.core.config import Settings, get_settings
 from backend.database.session import get_db
 from backend.models.administrator import Administrator
+from backend.models.client import Client
 from backend.services.auth_service import AuthenticationError, AuthService
+from backend.services.client_auth_service import ClientAuthService
+
+logger = logging.getLogger(__name__)
 
 # Reusable, typed dependency: injects the cached application Settings
 # instance into any route or service that declares `SettingsDependency`.
@@ -48,6 +49,21 @@ def get_auth_service(settings: SettingsDependency) -> AuthService:
 
 # Reusable, typed dependency: injects a configured `AuthService`.
 AuthServiceDependency = Annotated[AuthService, Depends(get_auth_service)]
+
+
+def get_client_auth_service() -> ClientAuthService:
+    """
+    Build a ``ClientAuthService``.
+
+    Unlike ``get_auth_service``, no settings are needed - API keys, unlike
+    administrator sessions, do not currently expire (see the scoping note
+    at the top of ``backend.services.client_auth_service``).
+    """
+    return ClientAuthService()
+
+
+# Reusable, typed dependency: injects a configured `ClientAuthService`.
+ClientAuthServiceDependency = Annotated[ClientAuthService, Depends(get_client_auth_service)]
 
 
 def require_administrator(
@@ -81,6 +97,60 @@ def require_administrator(
 # enforces that a valid session exists (raises 401 otherwise). Protected
 # admin routes (this ticket's and future tickets') should declare this.
 CurrentAdministrator = Annotated[Administrator, Depends(require_administrator)]
+
+
+def _extract_bearer_token(request: Request) -> str | None:
+    """
+    Extract the raw token from an ``Authorization: Bearer <token>`` header
+    (PRS Appendix B "Standard Request Headers" for Client Agent requests),
+    or ``None`` if the header is absent or does not use the Bearer scheme.
+    """
+    auth_header = request.headers.get("Authorization")
+    if not auth_header:
+        return None
+    scheme, _, token = auth_header.partition(" ")
+    if scheme.lower() != "bearer" or not token:
+        return None
+    return token
+
+
+def require_client_api_key(
+    request: Request,
+    db: DBSessionDependency,
+    client_auth_service: ClientAuthServiceDependency,
+) -> Client:
+    """
+    FastAPI dependency enforcing API-key authentication for Client Agent
+    requests (FR-002; AUTH-002's "Authentication dependency" deliverable).
+
+    This is the function every agent-facing router's ``dependencies=[...]``
+    list should include (see ``backend/api/routers/agent.py``) so that
+    "all agent endpoints protected" (AUTH-002 acceptance criterion) holds
+    automatically for every route added to that router - present or
+    future - without relying on each individual endpoint remembering to
+    declare it. Handlers that also need the identified ``Client`` object
+    itself should additionally declare ``CurrentClient`` as a parameter;
+    FastAPI resolves a given dependency at most once per request, so doing
+    both does not authenticate the request twice.
+
+    Raises ``AuthenticationError`` (401) if the ``Authorization`` header is
+    missing/malformed, or if ``ClientAuthService.authenticate`` rejects
+    the key as unknown.
+    """
+    raw_key = _extract_bearer_token(request)
+    if not raw_key:
+        raise AuthenticationError("Not authenticated. Missing or malformed Authorization header.")
+    client = client_auth_service.authenticate(db, raw_api_key=raw_key)
+    logger.debug("Client %s authenticated for %s %s.", client.id, request.method, request.url.path)
+    return client
+
+
+# Reusable, typed dependency: injects the authenticated Client and
+# enforces that a valid API key was presented (raises 401 otherwise).
+# Agent-facing routes (this ticket's and future tickets') should declare
+# this, in addition to applying `require_client_api_key` at the router
+# level (see the docstring above and backend/api/routers/agent.py).
+CurrentClient = Annotated[Client, Depends(require_client_api_key)]
 
 
 def _constant_time_equals(a: str, b: str) -> bool:

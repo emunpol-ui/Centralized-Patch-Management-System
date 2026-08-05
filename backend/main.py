@@ -24,6 +24,7 @@ from typing import AsyncIterator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from backend.api.routers.agent import router as agent_router
 from backend.api.routers.auth import router as auth_router
 from backend.api.routers.health import router as health_router
 from backend.core.config import get_settings
@@ -88,6 +89,7 @@ def create_app() -> FastAPI:
     # --- Routers -------------------------------------------------------------
     application.include_router(health_router)
     application.include_router(auth_router)
+    application.include_router(agent_router)
 
     return application
 
