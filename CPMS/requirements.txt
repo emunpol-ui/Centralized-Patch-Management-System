@@ -1,0 +1,26 @@
+# ============================================================
+# Centralized Patch Management System (CPMS) - Backend
+# Ticket: CORE-001 - Backend Foundation
+# ============================================================
+
+# --- Web framework ---
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+
+# --- Data validation / settings ---
+pydantic==2.10.4
+pydantic-settings==2.7.0
+
+# --- Environment configuration ---
+python-dotenv==1.0.1
+
+# --- Database layer (CPM-002) ---
+sqlalchemy==2.0.51
+alembic==1.18.5
+
+# --- Authentication (CPM-003) ---
+# bcrypt is pinned below 4.1: passlib 1.7.4's bcrypt-backend version
+# detection reads `bcrypt.__about__.__version__`, which newer bcrypt
+# releases (4.1+) removed, causing password hashing to fail outright.
+passlib==1.7.4
+bcrypt==4.0.1
