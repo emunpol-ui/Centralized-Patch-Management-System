@@ -24,6 +24,7 @@ from backend.models.client import Client
 from backend.services.auth_service import AuthenticationError, AuthService
 from backend.services.client_auth_service import ClientAuthService
 from backend.services.client_service import ClientService
+from backend.services.heartbeat_service import HeartbeatService
 
 logger = logging.getLogger(__name__)
 
@@ -77,6 +78,18 @@ def get_client_service() -> ClientService:
 
 # Reusable, typed dependency: injects a configured `ClientService`.
 ClientServiceDependency = Annotated[ClientService, Depends(get_client_service)]
+
+
+def get_heartbeat_service() -> HeartbeatService:
+    """
+    Build a ``HeartbeatService`` (CLIENT-002 - FR-003 heartbeat business
+    logic). Stateless, like every other service constructed here.
+    """
+    return HeartbeatService()
+
+
+# Reusable, typed dependency: injects a configured `HeartbeatService`.
+HeartbeatServiceDependency = Annotated[HeartbeatService, Depends(get_heartbeat_service)]
 
 
 def require_administrator(

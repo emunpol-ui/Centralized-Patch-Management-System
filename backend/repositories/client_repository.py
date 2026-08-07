@@ -8,15 +8,17 @@ CPM-002's ``backend/repositories/__init__.py`` deferred the full Client
 repository to "the tickets that introduce their respective domains
 (CLIENT-*...)". AUTH-002 added the single lookup method its own
 deliverable ("API Key validation") required (``get_by_api_key_hash``).
-This ticket (CLIENT-001) extends the class with the creation, lookup-by-
-``agent_guid``, and update operations FR-001 Client Registration
-requires - per AUTH-002's own note, methods are added here rather than in
-a second, competing Client repository.
+CLIENT-001 extended the class with the creation, lookup-by-``agent_guid``,
+and update operations FR-001 Client Registration requires. This ticket
+(CLIENT-002) further extends it with ``update_heartbeat`` (FR-003) - per
+AUTH-002's own note, methods are added here rather than in a second,
+competing Client repository.
 """
 
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -99,6 +101,26 @@ class ClientRepository:
         client.ip_address = ip_address
         client.operating_system = operating_system
         client.agent_version = agent_version
+        db.add(client)
+        db.flush()
+        return client
+
+    def update_heartbeat(self, db: Session, client: Client) -> Client:
+        """
+        Record a heartbeat for an already-registered ``Client`` (FR-003
+        steps 2-4): stamp ``last_heartbeat`` with the current server time
+        and mark ``status`` as ``ONLINE``.
+
+        The timestamp is generated here, server-side, via
+        ``datetime.now(timezone.utc)`` - the same pattern used by
+        ``AdministratorSessionRepository`` for its own time-based fields -
+        rather than accepting a caller-supplied value, per FR-003's own
+        functional behavior ("The server records the current timestamp as
+        the client's last heartbeat") and to avoid trusting a client's
+        possibly-skewed or falsified clock.
+        """
+        client.last_heartbeat = datetime.now(timezone.utc)
+        client.status = ClientStatus.ONLINE
         db.add(client)
         db.flush()
         return client
