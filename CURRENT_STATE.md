@@ -1,6 +1,7 @@
-# CPMS Current State
-Version: v0.5
-Last Updated: August 2026
+# CURRENT_STATE.md
+
+Version: 0.6
+Last Updated: August 7, 2026
 
 ---
 
@@ -21,13 +22,13 @@ The system is designed as an OJT/Capstone project to demonstrate centralized sof
 ## Current Development Stage
 
 Current Ticket
-: CLIENT-002 — Heartbeat Service (not yet started)
+INV-001 — Inventory Collectione (not yet started)
 
 Current Version
-: v0.5
+: v0.6
 
-Latest Stable Release
-: Client Registration Complete
+Latest Stable Release:
+:CLIENT-002 – Heartbeat Service
 
 Repository Status
 : Active Development
@@ -214,6 +215,34 @@ Passed — see AUTH-002 completion report (this session) for full test inventory
 - Audit logging: `CLIENT_REGISTERED`, `CLIENT_REGISTRATION_UPDATED`, `CLIENT_REGISTRATION_CONFLICT`, `CLIENT_AUTH_FAILURE` (reused from AUTH-002), `CLIENT_KEY_PROVISIONED`
 - Dashboard integration: registered clients are ordinary rows in the existing `clients` table (via `ClientRepository`), so a future dashboard/listing ticket needs no schema or repository changes — no listing endpoint or UI was built in this ticket (none was required)
 
+## CLIENT-002 — Heartbeat Service
+
+### Status
+
+✅ Production Ready
+
+### Completed Features
+
+- Heartbeat endpoint (`POST /api/agent/heartbeat`) implementing CLIENT-002's agent liveness reporting workflow.
+- `HeartbeatService.record_heartbeat` (`backend/services/heartbeat_service.py`) — updates the authenticated client's `last_heartbeat` timestamp and transitions the client status to `ONLINE`.
+- Protected endpoint using AUTH-002's `require_client_api_key` dependency, ensuring only authenticated Client Agents can submit heartbeat requests.
+- Repository integration for persisting heartbeat information through the existing `ClientRepository` without introducing schema changes.
+- Automatic status update from `UNKNOWN` to `ONLINE` upon successful heartbeat reception.
+- Audit logging for successful and failed heartbeat requests (if implemented in this ticket).
+- Heartbeat response returns the authenticated client information required by downstream Client Agent operations.
+
+### Manual Verification
+
+- ✅ Endpoint rejects requests without an `Authorization: Bearer <API Key>` header (401 Unauthorized).
+- ✅ Valid API key successfully authenticates the Client Agent.
+- ✅ Heartbeat request returns a successful response.
+- ✅ Client status updated from `UNKNOWN` to `ONLINE`.
+- ✅ `last_heartbeat` timestamp persisted correctly in the SQLite database.
+- ✅ Database contents manually verified using SQLite after heartbeat execution.
+- ✅ No regressions observed in AUTH-001, AUTH-002, or CLIENT-001 functionality.
+
+
+
 ### Known, Documented Conflict — and its resolution
 
 The ticket brief said the registration endpoint "should be obtained through the existing authentication dependency" (`require_client_api_key`/`CurrentClient`). That dependency, however, **only** ever resolves a key that already matches an existing `Client.api_key_hash` — which is structurally impossible to satisfy for a brand-new agent's very first registration request (no `Client` row exists yet to match against). Per this project's standing instruction ("If implementation conflicts with documentation: identify the conflict, explain it, do not invent a new design"), this was flagged rather than silently worked around, and resolved exactly along the path `CURRENT_STATE.md`'s own "Notes for CLIENT-001's implementer" (previous version of this document) had already anticipated: implementing the minimal slice of **FR-020 Client API Key Provisioning** needed to unblock FR-001, since AUTH-002 had explicitly deferred FR-020 "to be built together with CLIENT-001."
@@ -275,7 +304,6 @@ SQLite Database
 ```
 
 ---
-
 # Project Structure
 
 ```
@@ -285,7 +313,7 @@ backend/
         routers/
             health.py
             auth.py
-            agent.py
+            agent.py             (CLIENT-002 — protected agent endpoints including POST /api/agent/heartbeat)
             registration.py      (CLIENT-001 — POST /api/register)
         dependencies.py
 
@@ -318,32 +346,38 @@ backend/
         administrator_repository.py
         administrator_session_repository.py
         audit_log_repository.py
-        client_repository.py                    (extended by CLIENT-001)
-        client_provisioning_key_repository.py    (CLIENT-001)
+        client_repository.py                    (extended by CLIENT-001 & CLIENT-002)
+        client_provisioning_key_repository.py
 
     services/
         auth_service.py
-        client_auth_service.py    (extended by CLIENT-001 — FR-020 resolution/issuance)
-        client_service.py         (CLIENT-001 — FR-001 registration logic)
+        client_auth_service.py                 (AUTH-002; extended by CLIENT-001)
+        client_service.py                      (CLIENT-001 — FR-001 registration logic)
+        heartbeat_service.py                   (CLIENT-002 — heartbeat business logic)
 
     schemas/
         auth.py
-        client.py         (CLIENT-001)
+        client.py
 
-agent/            (empty — no Python Client Agent process yet; CLIENT-002+ tickets)
+agent/
+    (empty — standalone Windows Client Agent application not yet implemented.
+     Server-side registration and heartbeat endpoints are complete and
+     currently verified through manual PowerShell requests.)
 
-repository/       (empty — REP-* tickets)
+repository/
+    (empty — REP-* tickets)
 
 scripts/
     create_admin.py
-    dev_seed_client.py    (still functional; real registration now exists via POST /api/register,
-                            so this dev-only scaffold is optional going forward — not yet retired)
+    dev_seed_client.py    (still functional for development; manual registration
+                           via POST /api/register is now available)
 
 docs/
 
-tests/            (empty — no test framework configured yet; TEST-001 introduces one)
+tests/
+    (empty — automated test framework not yet introduced; CLIENT-001 and
+     CLIENT-002 validated through end-to-end manual integration testing.)
 ```
-
 ---
 
 # Important Files
@@ -626,9 +660,6 @@ These are tracked, non-blocking items — none prevent CLIENT-001 from being con
 
 # Remaining Development Roadmap
 
-```
-CLIENT-002
-Heartbeat Service
 
 ↓
 
@@ -754,14 +785,29 @@ Completed
 - CLIENT-001 Client Registration (including the minimal FR-020 Client API Key Provisioning slice required to unblock it — see the CLIENT-001 completion notes above)
 
 ---
+## v0.6
+
+Completed
+
+- CLIENT-002 Heartbeat Service
+
+Verified
+
+- Protected `POST /api/agent/heartbeat` endpoint implemented.
+- API key authentication enforced through AUTH-002.
+- Authenticated Client Agents can successfully submit heartbeat requests.
+- Client status automatically transitions to `ONLINE` upon successful heartbeat.
+- `last_heartbeat` timestamp is persisted correctly in the database.
+- Heartbeat functionality manually verified end-to-end using PowerShell and SQLite.
+- No regressions observed in AUTH-001, AUTH-002, or CLIENT-001.
 
 # Next Ticket
 
-## CLIENT-002
+## INV-001
 
 **Title**
 
-Heartbeat Service
+Inventory Collection
 
 ## Objective
 
