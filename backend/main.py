@@ -28,6 +28,7 @@ from backend.api.routers.agent import router as agent_router
 from backend.api.routers.auth import router as auth_router
 from backend.api.routers.health import router as health_router
 from backend.api.routers.registration import router as registration_router
+from backend.api.routers.repository import router as repository_router
 from backend.api.routers.updates import router as updates_router
 from backend.core.config import get_settings
 from backend.core.exceptions import register_exception_handlers
@@ -94,6 +95,7 @@ def create_app() -> FastAPI:
     application.include_router(agent_router)
     application.include_router(registration_router)
     application.include_router(updates_router)
+    application.include_router(repository_router)
 
     return application
 

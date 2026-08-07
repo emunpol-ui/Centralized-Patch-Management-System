@@ -1,6 +1,6 @@
 # CURRENT_STATE.md
 
-**Version:** 0.8  
+**Version:** 0.9  
 **Last Updated:** August 7, 2026
 
 ---
@@ -23,7 +23,8 @@ A proof-of-concept centralized software patch management system for Windows comp
 | Frontend | Bootstrap 5 (Jinja2 Templates not yet wired) |
 |Client Agent | Inventory collection scaffolding implemented (server-side inventory upload complete)|
 | Authentication | Admin: Session + CSRF cookie; Client: Bearer API Key (SHA-256) |
-| Deployment | Local Package Repository (not yet implemented) |
+| Deployment | Local Package Repository (upload implemented — REP-001; deployment execution not yet implemented) |
+| File Handling | `python-multipart` (installer upload parsing), SHA-256 (`hashlib`, standard library) |
 
 ### Architecture
 
@@ -56,10 +57,11 @@ backend/
 │   │   ├── auth.py                # Admin login/logout/me/keys
 │   │   ├── agent.py               # Protected agent endpoints (ping, heartbeat, inventory upload)
 │   │   ├── registration.py        # POST /api/register (CLIENT-001)
-│   │   └── updates.py             # Admin version-comparison endpoint (INV-002)
+│   │   ├── updates.py             # Admin version-comparison endpoint (INV-002)
+│   │   └── repository.py          # Admin installer upload endpoint (REP-001)
 │   └── dependencies.py            # DI providers (admin + client + services)
 ├── core/
-│   ├── config.py
+│   ├── config.py                  # Extended (REP-001): MAX_INSTALLER_UPLOAD_SIZE_MB
 │   ├── security.py                # Token/hash primitives
 │   ├── logging.py
 │   └── exceptions.py              # Global exception handlers
@@ -76,7 +78,7 @@ backend/
 │   ├── client.py
 │   ├── client_provisioning_key.py
 │   ├── software_inventory.py
-│   ├── repository_package.py
+│   ├── repository_package.py      # Reused unmodified by REP-001
 │   ├── deployment.py
 │   ├── deployment_target.py
 │   └── audit_log.py
@@ -87,28 +89,31 @@ backend/
 │   ├── client_repository.py               # Extended (INV-002): get_by_id
 │   ├── client_provisioning_key_repository.py
 │   ├── software_inventory_repository.py   # INV-001 inventory persistence
-│   └── repository_package_repository.py   # INV-002 read-only repository catalog access
+│   └── repository_package_repository.py   # Extended (REP-001): create, get_active_conflict
 ├── services/
 │   ├── auth_service.py
 │   ├── client_auth_service.py
 │   ├── client_service.py
 │   ├── heartbeat_service.py
 │   ├── inventory_service.py               # Inventory synchronization service
-│   └── version_comparison_service.py      # FR-007 version comparison business logic (INV-002)
+│   ├── version_comparison_service.py      # FR-007 version comparison business logic (INV-002)
+│   └── repository_service.py              # FR-006 installer upload business logic (REP-001)
 ├── utils/
-│   └── version_compare.py                 # FR-007 name/version matching + comparison rules (INV-002)
+│   ├── version_compare.py                 # FR-007 name/version matching + comparison rules (INV-002)
+│   └── file_storage.py                    # FR-006 extension validation, SHA-256 hashing, file streaming (REP-001)
 └── schemas/
     ├── auth.py
     ├── client.py
     ├── inventory.py                       # Inventory upload request schemas
-    └── updates.py                         # Version comparison response schemas (INV-002)
+    ├── updates.py                         # Version comparison response schemas (INV-002)
+    └── repository.py                      # Installer upload metadata + response schemas (REP-001)
 
 agent/                                     # Client Agent (initial implementation)
 ├── communication/                         # Server communication helpers
 ├── scanner/                               # Windows Registry inventory scanner
 └── main.py                                # Agent entry point
 
-repository/                                # Local package repository (not yet implemented)
+repository/                                # Local package repository (REP-001 — now receives uploaded installers)
 
 scripts/
 ├── create_admin.py                        # Production admin provisioning
@@ -124,9 +129,9 @@ tests/                                     # Empty skeleton (no pytest configure
 
 | Metric                    | Status                                          |
 | ------------------------- | ------------------------------------------------ |
-| **Current Version**       | v0.8                                            |
-| **Development Stage**     | REP-001 — Repository Management (not yet started)|
-| **Latest Stable Release** | INV-002 — Version Comparison                    |
+| **Current Version**       | v0.9                                            |
+| **Development Stage**     | REP-002 — Repository Dashboard (not yet started)|
+| **Latest Stable Release** | REP-001 — Repository Management                 |
 | **Repository Status**     | Active Development                              |
 | **Architecture Status**   | Stable                                          |
 | **Regression Status**     | No known regressions from completed tickets     |
@@ -143,16 +148,17 @@ tests/                                     # Empty skeleton (no pytest configure
 | v0.6    | CLIENT-002 — Heartbeat Service                        |
 | v0.7    | INV-001 — Inventory Collection                        |
 | v0.8    | INV-002 — Version Comparison                          |
+| v0.9    | REP-001 — Repository Management                       |
 
 ### Current Ticket
 
-**REP-001 — Repository Management** (not yet started)
+**REP-002 — Repository Dashboard** (not yet started)
 
 ### Next Ticket
 
-**REP-001 — Repository Management**
+**REP-002 — Repository Dashboard**
 
-**Purpose:** Implement the local software package repository, including installer upload, metadata validation, SHA-256 checksum verification, and package storage.
+**Purpose:** Provide an administrator-facing view of uploaded repository packages (list, search, delete/deactivate, package details).
 
 ---
 
@@ -380,7 +386,7 @@ Database Persistence
   - `normalize_publisher` — trim + case-fold, provided as a general-purpose helper (see limitation note below)
   - `parse_version` — parses a period-delimited numeric-segment version string; returns `None` if unparseable
   - `compare_versions` — left-to-right numeric segment comparison (shorter tuples zero-padded); returns `None` if either side is unparseable (FR-007 Version Comparison Rules)
-- `RepositoryPackageRepository` (new) — minimal read-only slice (`list_approved`) needed for comparison; excludes `INACTIVE` packages (FR-017 "removal" mechanism). Package upload/maintenance remains out of scope, deferred to REP-001.
+- `RepositoryPackageRepository` (introduced) — minimal read-only slice (`list_approved`) needed for comparison; excludes `INACTIVE` packages (FR-017 "removal" mechanism). Package upload/maintenance was deferred at the time to REP-001 (now implemented — see below).
 - `VersionComparisonService` (new) — `compare_client_inventory(db, client_id=...)`:
   - Loads a client's `SoftwareInventory` records (reusing `SoftwareInventoryRepository.list_for_client` unmodified) and the approved `RepositoryPackage` catalog
   - Groups approved packages by normalized software name for lookup
@@ -408,10 +414,64 @@ Database Persistence
 - ✅ Full application import and OpenAPI schema generation confirmed the new route registers correctly alongside all existing routes
 - ✅ No regressions detected in CORE-001, CORE-002, AUTH-001, AUTH-002, CLIENT-001, CLIENT-002, or INV-001 (existing endpoints, models, and services were not modified beyond the additive `ClientRepository.get_by_id` method)
 
-**Important Note:** No database schema or migration changes were required — `UpdateStatus` is a Python-level enum used only for in-memory classification and API response shaping, not a database column. Repository package data will typically be empty until REP-001 (Repository Management) is implemented; the endpoint is fully functional and will simply report every inventory item as Not Managed until approved packages exist.
+**Important Note:** No database schema or migration changes were required — `UpdateStatus` is a Python-level enum used only for in-memory classification and API response shaping, not a database column. Repository package data was empty until REP-001; the endpoint has been re-verified below to now report real comparison results once approved packages exist.
 
 ---
 
+### REP-001 — Repository Management
+
+| Status | ✅ Production Ready |
+
+**Objective:** Implement the Local Package Repository (FR-006 Software Repository Management): allow an administrator to upload installer packages, validate their metadata, compute and verify a SHA-256 checksum, and persist package metadata for future deployment (DEPLOY-*).
+
+**Features Implemented:**
+
+- `backend/utils/file_storage.py` (new) — pure, database-independent FR-006 "Upload Validation Rules" helpers:
+  - `validate_extension` — rejects an uploaded file whose extension does not match the declared Installer Type (`.exe` for EXE, `.msi` for MSI)
+  - `generate_storage_filename` — generates a new, random, server-controlled filename (UUID4 hex + extension); the client-supplied filename is never trusted for storage or path construction
+  - `save_and_hash` — streams the uploaded file to disk in fixed-size (1 MiB) chunks, computing its SHA-256 checksum while writing, enforcing the configured maximum upload size, and rejecting/cleaning up empty or oversized uploads (the partially-written file is deleted on any failure)
+- `backend/schemas/repository.py` (new):
+  - `RepositoryPackageUploadMetadata` — validates the `multipart/form-data` metadata fields accompanying an upload (non-blank software name/version; the Silent Installation Command must reference the installer only via the `{installer_path}` placeholder token and must not contain shell operators, `..`, or other unsafe sequences — enforcing FR-006's Repository Metadata constraint on `silent_command` at upload time, ahead of FR-011's execution-time direct-process-execution behavior)
+  - `RepositoryPackageResponse` — response DTO built from a persisted `RepositoryPackage` ORM instance
+- `RepositoryPackageRepository` (introduced by INV-002) extended with:
+  - `create` — persists a new `RepositoryPackage` row (defaults to `APPROVED`)
+  - `get_active_conflict` — FR-006 duplicate-entry detection: returns an existing `APPROVED` package sharing the same normalized software name (reusing INV-002's `normalize_software_name`) and exact version string, or `None`
+  - `list_approved` (INV-002) unchanged
+- `RepositoryService` (new, `backend/services/repository_service.py`) — `upload_package(...)` orchestrates the full FR-006 upload workflow: extension validation → duplicate-conflict check (audit-logged and rejected before any file I/O) → server-generated filename → streamed checksum/size-enforced file write → metadata persistence → audit log (`REPOSITORY_PACKAGE_UPLOADED`) → commit
+  - `RepositoryPackageValidationError` (400) — extension mismatch, oversized upload, or empty file
+  - `RepositoryPackageConflictError` (409) — duplicate approved package for the same name + version
+- New administrator-facing, state-changing endpoint: `POST /api/admin/repository/packages` (Backlog REP-001 "Installer upload" deliverable)
+  - `multipart/form-data`: `installer` (file, `.exe`/`.msi`) + `software_name`, `version`, `installer_type`, `silent_command` (form fields)
+  - Protected by `CurrentAdministrator` (session cookie) **and** `CSRFProtection` (state-changing request, NFR-028) — the same pattern as `POST /api/admin/keys`
+  - Returns `201 Created` with the persisted package's metadata (including its computed SHA-256 checksum) on success
+- `backend/core/config.py` extended: `MAX_INSTALLER_UPLOAD_SIZE_MB` (default `500`) and the derived `max_installer_upload_size_bytes` property, filling in FR-018's "Maximum installer upload size" configurable setting (the `REPOSITORY_DIR`/`repository_path` setting was already reserved by CORE-001/config.py and required no changes)
+- `requirements.txt` extended: `python-multipart==0.0.20` (required by FastAPI to parse `multipart/form-data` — the installer file + form metadata fields)
+- `backend/api/dependencies.py` extended: `get_repository_service` / `RepositoryServiceDependency`, following the existing per-service DI factory pattern
+- `backend/main.py` extended: registers the new `repository_router`
+
+**Design Decisions (Documented):**
+
+- **Duplicate detection scope:** "Duplicate" is defined as an existing `APPROVED` package sharing the same FR-007-normalized software name and an exact (trimmed) version-string match. `INACTIVE` (FR-017 "removed") packages are excluded from the conflict check, so a previously removed package does not block re-uploading the same name/version.
+- **Approval status on upload:** A newly uploaded package is persisted directly as `APPROVED` (matching `RepositoryPackage.approval_status`'s existing default). PRS FR-006 describes an uploaded, validated package as immediately "available for deployment selection," with no separate approval workflow currently defined; introducing one was judged out of scope for REP-001.
+- **Order of validation:** Extension/installer-type consistency is checked first (no I/O), then the duplicate-entry check (a single, bounded database query — no file I/O yet), and only then is the (potentially large) file streamed to disk. This ensures a request that will ultimately be rejected fails as early and cheaply as possible.
+- **Silent command safety enforced at two layers:** `RepositoryPackageUploadMetadata` rejects an unsafe `silent_command` at upload time (FR-006), independent of and in addition to FR-011's already-implemented execution-time direct-process-execution behavior (`shell=False`-equivalent invocation, implemented client-agent-side prior to this ticket) — defense in depth, not a replacement for either control.
+- **Repository storage location unchanged:** Reused the existing `Settings.REPOSITORY_DIR` / `repository_path` (reserved since CORE-001), which resolves to a project-root `repository/` directory outside `backend/static/` — the only web-server-exposed directory in this application — satisfying FR-006's "not directly accessible via the web server" rule without any new configuration.
+
+**Manual/Scripted Verification (via `TestClient` against a full FastAPI app + real SQLite database):**
+
+- ✅ Successful upload: `201 Created`, response `checksum` matches an independently computed `hashlib.sha256` digest of the uploaded content, `file_size` matches the byte count, `installer_filename` is a server-generated UUID4-based name (not the client-supplied name), and the file is confirmed present on disk under the configured repository directory
+- ✅ Duplicate upload (same normalized software name + version, already `APPROVED`): rejected `409 Conflict`; audit log entry (`REPOSITORY_UPLOAD_CONFLICT`) recorded; no file written for the rejected request
+- ✅ Extension/installer-type mismatch (`.msi` file with `installer_type=EXE`): rejected `400 Bad Request` before any file write
+- ✅ Invalid Silent Installation Command (missing `{installer_path}` placeholder): rejected `400 Bad Request` at the Pydantic metadata-validation layer, before the file is streamed
+- ✅ Missing/invalid CSRF token: rejected `403 Forbidden`
+- ✅ Unauthenticated request (no administrator session): rejected `401 Unauthorized`
+- ✅ Full application import and OpenAPI schema generation confirmed `POST /api/admin/repository/packages` registers correctly alongside all existing routes
+- ✅ `pyflakes` reports no warnings across all new/modified files
+- ✅ No regressions detected in CORE-001, CORE-002, AUTH-001, AUTH-002, CLIENT-001, CLIENT-002, INV-001, or INV-002 — `RepositoryPackageRepository.list_approved` and `VersionComparisonService` were not modified; `GET /api/admin/clients/{client_id}/updates` will automatically reflect newly uploaded packages with no further code changes
+
+**Important Note:** No database schema or migration changes were required — `RepositoryPackage` (defined by CORE-002) already had every column this ticket needed (`checksum`, `file_size`, `installer_filename`, `silent_command`, `installer_type`, `approval_status`). REP-001 is upload-only: metadata *editing* and *removal* (FR-017 Repository Maintenance) and a package-listing/browse view (REP-002 Repository Dashboard) remain unimplemented.
+
+---
 ## Current System State
 
 ### APIs Available (Implemented)
@@ -424,6 +484,7 @@ Database Persistence
 | GET    | `/api/admin/me`                           | Current administrator information                        | Admin session                         |
 | POST   | `/api/admin/keys`                         | Issue client provisioning key (FR-020)                   | Admin session + CSRF                  |
 | GET    | `/api/admin/clients/{client_id}/updates`  | Compare a client's inventory against the repository (FR-007) | Admin session                     |
+| POST   | `/api/admin/repository/packages`          | Upload an approved installer package (FR-006)             | Admin session + CSRF                  |
 | POST   | `/api/register`                           | Client registration                                       | Provisioning key or existing API key  |
 | GET    | `/api/agent/ping`                         | Verify client authentication                              | Client API key                        |
 | POST   | `/api/agent/heartbeat`                    | Report client heartbeat                                   | Client API key                        |
@@ -435,8 +496,8 @@ Database Persistence
 - Tables: `administrators`, `administrator_sessions`, `clients`, `client_provisioning_keys`, `software_inventories`, `repository_packages`, `deployments`, `deployment_targets`, `audit_logs`, `alembic_version`
 - All models use UUID primary keys
 - Relationships and constraints defined
-- Audit logging integrated for all authentication and registration events
-- **No schema changes in INV-002** — version comparison is computed on demand from existing `software_inventory` and `repository_packages` tables; no migration was added
+- Audit logging integrated for all authentication, registration, and repository upload events
+- **No schema changes in REP-001** — `repository_packages` already had every column this ticket needed (CORE-002); no migration was added
 
 ### Authentication Status
 
@@ -445,6 +506,7 @@ Database Persistence
 - Double-submit CSRF protection
 - Sliding inactivity expiry
 - `Secure` flag configurable (`SESSION_COOKIE_SECURE`, default `False` for HTTP-only prototype — **must set `True` for HTTPS**)
+- `POST /api/admin/repository/packages` (REP-001) requires both the session cookie and a valid CSRF token, consistent with every other state-changing administrator endpoint
 
 **Client:**
 
@@ -454,7 +516,29 @@ Database Persistence
 - Registration endpoint uses its own credential resolution (existing `Client` OR unclaimed `ClientProvisioningKey`)
 - Authenticated inventory uploads use the existing API key authentication without additional authorization requirements
 
-### Client Workflow (Current)
+### Repository Workflow (New — REP-001)
+
+```text
+1. Administrator authenticates
+   → POST /api/admin/login
+
+2. Administrator uploads an installer package
+   → POST /api/admin/repository/packages
+   (multipart/form-data: installer file + software_name, version,
+    installer_type, silent_command)
+   ├── Extension validated against installer_type
+   ├── Duplicate (same name+version, APPROVED) rejected → 409
+   ├── File streamed to repository/ under a generated UUID4 filename
+   ├── SHA-256 checksum computed while streaming
+   └── RepositoryPackage record persisted (status: APPROVED)
+
+3. Administrator reviews version comparison
+   → GET /api/admin/clients/{client_id}/updates
+   └── Newly uploaded packages are picked up automatically —
+       VersionComparisonService and this endpoint were not modified
+```
+
+### Client Workflow (Unchanged from v0.8)
 
 ```text
 1. Administrator issues provisioning key
@@ -487,16 +571,16 @@ Database Persistence
 
 ## Deployment Workflow (Not Yet Implemented)
 
-- Local Package Repository: not yet implemented (upload/maintenance — REP-001)
-- Silent Installers: not yet implemented
-- SHA-256 Package Validation: schema exists (`RepositoryPackage.checksum`) but upload-time computation logic not implemented
+- Local Package Repository: **upload implemented (REP-001)** — repository listing/browse (REP-002) and deployment execution (DEPLOY-*) remain not yet implemented
+- Silent Installers: not yet executed by a deployment (silent command is validated and stored at upload time; execution belongs to DEPLOY-003 client-side work, already partially anticipated by the existing FR-011 direct-process-execution design)
+- SHA-256 Package Validation: **upload-time computation now implemented** (REP-001, `RepositoryPackage.checksum`); download-time re-verification by the Client Agent (FR-010/FR-011) remains part of future DEPLOY-* tickets
 
 ### Existing Infrastructure
 
-- **No automated test framework** configured (`pytest` not in `requirements.txt`; `tests/` directory remains an empty skeleton). All verification is currently performed through manual API testing, PowerShell scripts, direct SQLite inspection, and (for INV-002) ad hoc scripted verification using FastAPI's `TestClient`.
+- **No automated test framework** configured (`pytest` not in `requirements.txt`; `tests/` directory remains an empty skeleton). All verification is currently performed through manual API testing, PowerShell scripts, direct SQLite inspection, and (for INV-002/REP-001) ad hoc scripted verification using FastAPI's `TestClient`.
 - **No scheduler/background tasks** — client `OFFLINE` status is currently computed at read time rather than maintained by a background service. Version comparison (INV-002) follows this same "computed at read time" pattern.
-- **No repository package upload endpoint** — `repository_packages` can only currently be populated by direct database access; `GET /api/admin/clients/{client_id}/updates` will report every inventory item as Not Managed until REP-001 introduces upload.
-- **No administrator-facing inventory or client listing endpoints** — client registration and software inventory data are stored successfully and can now be compared against the repository (INV-002), but there is still no general "list clients" or "list inventory" endpoint. These capabilities remain planned for a future dashboard-facing ticket.
+- **Repository package listing endpoint not yet implemented** — packages can be uploaded (REP-001) but there is no `GET` endpoint to list/browse them yet; that is REP-002's "Repository Dashboard" deliverable. Uploaded packages are, however, immediately visible indirectly through `GET /api/admin/clients/{client_id}/updates` once a client has matching inventory.
+- **No administrator-facing inventory or client listing endpoints** — client registration and software inventory data are stored successfully and can be compared against the repository (INV-002) and now populated via real uploads (REP-001), but there is still no general "list clients" or "list inventory" endpoint. These capabilities remain planned for a future dashboard-facing ticket.
 - **Client Agent scaffolding implemented** — communication layer, inventory scanner, and application entry point exist; automated Windows Registry inventory collection will be exercised through the deployed Windows Agent in future milestones.
 - **No frontend UI** (Jinja2 templates not yet wired; HTMX optional and not yet implemented).
 - **No CORS configuration for credentialed cross-origin clients** — `CORS_ORIGINS` currently defaults to `"*"` with `allow_credentials=True`, which browsers reject. This is acceptable for the current same-origin prototype but will require explicit origin configuration before introducing a separate frontend.
@@ -587,12 +671,22 @@ Database Persistence
 | **Regression**   | Passed (scripted unit tests for utility functions, ORM-level service tests, and `TestClient` API-level tests; no existing files behaviorally modified beyond the additive `ClientRepository.get_by_id`) |
 
 ---
+
+### REP-001 — Repository Management
+
+| Status           | ✅ Production Ready                                                                                                                                         |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Purpose**      | Implement the local software package repository: installer upload, metadata validation, SHA-256 checksum computation/verification, and package storage (FR-006) |
+| **Deliverables** | `backend/utils/file_storage.py`, `backend/schemas/repository.py`, `RepositoryPackageRepository.create`/`get_active_conflict`, `RepositoryService`, `POST /api/admin/repository/packages`, `Settings.MAX_INSTALLER_UPLOAD_SIZE_MB` |
+| **Design Decisions** | Duplicate detection scoped to `APPROVED` packages sharing a normalized name + exact version; uploaded packages default to `APPROVED` (no separate approval workflow defined); silent command safety validated at upload time in addition to FR-011's existing execution-time control |
+| **Regression**   | Passed (`TestClient`-based end-to-end verification of success, duplicate-conflict, extension-mismatch, invalid-silent-command, missing-CSRF, and unauthenticated scenarios; `pyflakes` clean; no existing files behaviorally modified beyond the additive `RepositoryPackageRepository` methods) |
+
+---
 ## Pending Backlog
 
 | Ticket | Purpose | Dependencies | Priority |
 |--------|---------|--------------|----------|
-| **REP-001** | Repository Management — upload packages, SHA-256 validation | CORE-002 | Next |
-| **REP-002** | Repository Dashboard — manage repository packages | REP-001 | - |
+| **REP-002** | Repository Dashboard — manage repository packages | REP-001 | Next |
 | **DEPLOY-001** | Deployment Creation — create deployment tasks | INV-002 (Version Comparison) | - |
 | **DEPLOY-002** | Agent Polling — clients poll for deployments | DEPLOY-001 | - |
 | **DEPLOY-003** | Installer Download & Execution — client-side | DEPLOY-002 | - |
@@ -671,6 +765,13 @@ Database Persistence
 - When more than one approved package shares a normalized software name, the candidate with the highest parseable version is preferred
 - Results are not persisted; there is no "comparison results" database table (PRS Chapter 7's entity list does not define one) — any future need for historical comparison snapshots is new, additive scope
 
+### Repository Upload Strategy (REP-001)
+- Filesystem I/O and hashing logic (`backend/utils/file_storage.py`) is kept pure and database-independent, mirroring `version_compare.py`'s separation, so it can be unit-tested without a database session or a running FastAPI app
+- Files are streamed in 1 MiB chunks rather than buffered fully in memory; the SHA-256 checksum is computed incrementally as each chunk is written, avoiding a second full read of a potentially large installer file
+- The uploaded file's *extension* (not its content/magic bytes) is validated against the declared Installer Type, per FR-006's literal wording ("Only files with an extension of .exe or .msi shall be accepted, consistent with the Installer Type field"); content-based file-type sniffing was judged out of scope for this ticket
+- Duplicate-entry detection (`RepositoryPackageRepository.get_active_conflict`) reuses INV-02's `normalize_software_name` rather than introducing a second name-normalization rule, keeping "does this package already exist" and "does this installed item match a package" consistent
+- `RepositoryService.upload_package` orders its checks (extension → duplicate → file write) to fail cheaply before performing the most expensive operation (streaming a potentially large file to disk)
+
 ### Future Migration Considerations
 - SQLAlchemy dialect-portable `Uuid` type used for all primary/foreign keys (deliberate deviation from PRS's illustrative auto-increment integers — documented in `backend/models/base.py`)
 - `Secure` cookie flag configurable — must be set `True` once HTTPS is deployed
@@ -684,15 +785,16 @@ Database Persistence
 |-------|--------|--------|
 | **No automated test framework** | Tracked | All verification manual/scripted; `tests/` empty; `pytest` not in requirements |
 | **Router-level agent protection not automatically inherited** | Process risk | Future routers must independently apply `dependencies=[Depends(require_client_api_key)]` unless documented exception (registration) |
-| **No admin-facing listing endpoints** | Tracked | Clients, provisioning keys only visible via direct database inspection; INV-002 added a per-client comparison view, but no general "list all clients" endpoint yet |
+| **No admin-facing listing endpoints** | Tracked | Clients, provisioning keys, and repository packages only visible via direct database inspection or (for repository packages) indirectly through the version-comparison endpoint; REP-002 is expected to add a repository package listing view |
 | **`RepositoryPackage` has no `publisher` column** | Tracked | FR-007's optional publisher-based match disambiguation cannot be applied against the repository catalog until/unless a future ticket adds this column and a migration |
-| **Repository catalog empty until REP-001** | Tracked | `GET /api/admin/clients/{client_id}/updates` is fully functional but will classify every item as Not Managed until REP-001 introduces package upload |
+| **No approval workflow for uploaded packages** | Tracked | REP-001 persists every valid upload directly as `APPROVED`; if a future requirement calls for a distinct upload → pending-approval → approved workflow, this will need a follow-up ticket |
 | **Pre-existing cosmetic nit** | Untouched | `auth.py` declares unused `logger` (not called, left per "do not modify completed tickets unless integration requires") |
 | **CORS + credentialed cross-origin** | Condition | `CORS_ORIGINS="*"` + `allow_credentials=True` is invalid for browsers; needs concrete origin list for separate frontend |
 | **`dev_seed_client.py` not retired** | Untouched | Still functional; retiring judged out of scope for CLIENT-001 review |
 | **No expiration/revocation for provisioning keys** | Future work | Issued-but-never-claimed keys remain valid indefinitely; worth revisiting with dashboard/key-management ticket |
 | **No scheduler for OFFLINE detection** | Design choice | Offline status computed at read time; background jobs not yet introduced |
 | **`updated_at` serves as registration timestamp** | Implicit | No separate `last_registration` field; registration updates touch `updated_at` |
+| **No client-side download-time checksum re-verification yet** | Tracked | REP-001 computes and stores the checksum at upload time (FR-006); the Client Agent's download-time re-verification (FR-010/FR-011) is DEPLOY-* scope, not yet implemented |
 
 ---
 
@@ -730,21 +832,25 @@ Database Persistence
 - Authentication: admin successes + failures; client failures only (successes not individually audit-logged per AUTH-002 rationale)
 - Registration, inventory, repository, deployment operations logged
 - Version comparison (INV-002) logs at DEBUG level only (a read-only query, not a state-changing operation warranting an audit-log entry — no FR-007 examples appear in the PRS's audit-logged-events list)
+- Repository package uploads (REP-001) are audit-logged at INFO (`REPOSITORY_PACKAGE_UPLOADED`) on success and WARNING (`REPOSITORY_UPLOAD_CONFLICT`) on a rejected duplicate, matching the PRS's explicit "Repository Uploads" audit-logged-events entry
 - Unexpected errors logged globally by `backend/core/exceptions.py`
 
 ### Error Handling
 - Every endpoint validates inputs, handles exceptions, returns consistent responses
 - `AppException` (and `AuthenticationError` subclass) is standard base for all business-rule errors
 - `ClientNotFoundError` (INV-002, `backend/api/routers/updates.py`) follows this same `AppException` pattern for its 404 case
+- `RepositoryPackageValidationError` (400) and `RepositoryPackageConflictError` (409) (REP-001, `backend/services/repository_service.py`) follow the same pattern for their respective cases; `RepositoryPackageMetadataError` (400, `backend/api/routers/repository.py`) adapts a Pydantic `ValidationError` raised while manually constructing `RepositoryPackageUploadMetadata` from `Form(...)` fields into the same standard envelope
 - Global handlers convert Pydantic validation errors and unhandled exceptions to standard `{"success", "message", "error"}` envelope
 
 ### Security Standards
 - Passwords: bcrypt via Passlib, never plaintext
 - API Keys: `secrets.token_urlsafe`, unique, SHA-256 hash-at-rest
 - Session Cookies: HttpOnly, `Secure` configurable, CSRF-protected (double-submit)
-- Repository Packages: SHA-256 verification (schema in place; logic not yet implemented)
+- Repository Packages: SHA-256 computed and stored at upload time (REP-001); download-time re-verification by the Client Agent remains DEPLOY-* scope
+- Repository Packages: server-generated, sanitized storage filenames only — the client-supplied filename is never used for storage or path construction; uploads are size-bounded (`MAX_INSTALLER_UPLOAD_SIZE_MB`) and extension-validated against the declared installer type
 - Deployments: Validate package integrity before execution (not yet implemented)
 - Version comparison endpoint: read-only, admin-session-protected, no CSRF required (NFR-028 scopes CSRF to state-changing requests)
+- Repository upload endpoint: state-changing, admin-session **and** CSRF protected (NFR-028)
 
 ### Database Standards
 - SQLAlchemy ORM only — no raw SQL
@@ -762,7 +868,7 @@ Database Persistence
 | Module | Purpose |
 |--------|---------|
 | `backend/api/routers/agent.py` | Add new agent-facing endpoints (protected by `require_client_api_key`) |
-| `backend/repositories/repository_package_repository.py` | REP-001 will extend this with write operations (upload, metadata update, deactivate) |
+| `backend/repositories/repository_package_repository.py` | REP-002 will extend this further with read/list operations (browse, search) and FR-017 removal (status change to `INACTIVE`) |
 | `backend/services/` | Add business logic for new features |
 | `backend/repositories/` | Extend with new data access methods |
 | `backend/models/` | Add new models only when necessary |
@@ -772,24 +878,22 @@ Database Persistence
 
 ## Next Recommended Work
 
-### REP-001 — Repository Management
+### REP-002 — Repository Dashboard
 
-**Purpose:** Implement the local software package repository: installer upload, metadata validation, SHA-256 checksum computation/verification, and package storage (FR-006).
+**Purpose:** Provide administrator-facing management of uploaded repository packages: list/browse, search, view package details, and remove (deactivate) obsolete packages (FR-006 dashboard integration, FR-017 Repository Maintenance).
 
 **Expected Deliverables:**
 
-- Installer upload endpoint (administrator-facing, session + CSRF protected)
-- Metadata validation (software name, version, installer type, silent install command)
-- SHA-256 checksum computation on upload, stored on `RepositoryPackage.checksum`
-- Package file storage (outside the web-server-accessible directory, per PRS FR-006 Upload Validation Rules)
-- Extend `RepositoryPackageRepository` (introduced by INV-002) with write operations: `create`, `update`, `deactivate`
+- `GET /api/admin/repository/packages` — list all repository packages (likely both `APPROVED` and `INACTIVE`, or filterable by status)
+- `GET /api/admin/repository/packages/{package_id}` — package detail view
+- `POST /api/admin/repository/packages/{package_id}/deactivate` (or similar) — FR-017 "removal" via `approval_status = INACTIVE`, **not** a physical row delete (see the design note on `backend.models.repository_package.RepositoryPackage` re: `Deployment.repository_id` referential integrity)
+- Extend `RepositoryPackageRepository` with the necessary read operations (`list_all`, `get_by_id`) and a `deactivate`/`update_status` write operation
 
 **Notes for Implementer:**
 
-- Reuse the existing `RepositoryPackageRepository` (`backend/repositories/repository_package_repository.py`); extend it with write methods rather than creating a second, competing repository.
-- `VersionComparisonService.list_approved` (via the repository) already reads by `ApprovalStatus.APPROVED` — REP-001's "removal" (FR-017) should continue to be a status change to `INACTIVE`, not a row deletion, to preserve `VersionComparisonService`'s existing exclusion behavior and any future deployment history integrity.
-- Do **not** modify `VersionComparisonService` or `GET /api/admin/clients/{client_id}/updates` unless a defect is discovered — once packages exist, comparison results will populate automatically with no code changes required.
-- Follow the existing Repository → Service → Router architecture.
+- Reuse the existing `RepositoryPackageRepository` (extended by INV-002 and REP-001); add further methods rather than creating a second, competing repository.
+- Do **not** modify `VersionComparisonService`, `GET /api/admin/clients/{client_id}/updates`, or `RepositoryService.upload_package` unless a defect is discovered.
+- Follow the existing Repository → Service → Router architecture, and the same `CurrentAdministrator` (+ `CSRFProtection` for any state-changing action) authorization pattern already used by `POST /api/admin/repository/packages`.
 - No scheduler or background services are required.
 
 ---
@@ -808,8 +912,9 @@ Database Persistence
 | Heartbeat Service | ✅ Production Ready |
 | Inventory Collection | ✅ Production Ready |
 | Version Comparison | ✅ Production Ready |
+| Repository Management (Upload) | ✅ Production Ready (REP-001) |
 | Client Agent | ⚠ Agent scaffolding implemented (automatic registry scanning pending deployment) |
-| Repository Management | ❌ Not yet implemented (REP-001 — current next ticket) |
+| Repository Dashboard (Listing/Removal) | ❌ Not yet implemented (REP-002 — current next ticket) |
 | Deployment | ❌ Not yet implemented |
 | Frontend Dashboard | ❌ Not yet implemented |
 
@@ -822,6 +927,7 @@ Database Persistence
 - Router-level protection for authenticated `/api/agent/*` endpoints
 - Software inventory snapshot synchronization implemented
 - Version comparison against the approved repository catalog implemented, computed on demand (not persisted)
+- Repository package upload implemented: SHA-256 checksum computed at upload time, server-generated storage filenames, duplicate-entry rejection
 - Client Agent scaffolding prepared for automated Windows Registry inventory collection
 
 ### Completed Modules (Do Not Redesign)
@@ -834,38 +940,39 @@ Database Persistence
 - CLIENT-002: Heartbeat Service
 - INV-001: Inventory Collection
 - INV-002: Version Comparison
+- REP-001: Repository Management (Upload)
 
 ### Current Blockers
 
 - No automated test framework (manual verification only)
 - No scheduler/background task infrastructure
-- No administrator dashboard for viewing uploaded inventory or comparison results (API-only so far)
-- No repository management module (no way to populate `repository_packages` other than direct DB access, so version comparison currently has nothing to match against in a fresh environment)
+- No administrator dashboard for viewing uploaded inventory, repository packages, or comparison results (API-only so far)
+- No repository package listing/browse endpoint yet (REP-002)
 - No deployment management module
 
 ### Immediate Next Task
 
-**REP-001 — Repository Management**
+**REP-002 — Repository Dashboard**
 
-- Implement installer upload, metadata validation, and SHA-256 checksum computation (FR-006)
-- Extend the existing `RepositoryPackageRepository` (introduced by INV-002) with write operations
-- Store installer files outside the web-server-accessible directory
-- Keep `VersionComparisonService` and its endpoint unmodified — they will pick up newly approved packages automatically
+- Implement repository package listing/browse and detail endpoints
+- Implement FR-017 "removal" as a status change to `INACTIVE` (not a physical delete)
+- Extend the existing `RepositoryPackageRepository` (extended by INV-002 and REP-001) with the needed read/status-update operations
+- Keep `RepositoryService.upload_package`, `VersionComparisonService`, and their endpoints unmodified unless a defect is discovered
 
 ### Files Likely to Be Modified
 
 | File | Reason |
 |------|--------|
-| `backend/api/routers/` | Add administrator repository-upload endpoints |
-| `backend/repositories/repository_package_repository.py` | Add write operations (create/update/deactivate) |
-| `backend/services/` | Add `RepositoryService` for FR-006 business logic |
-| `backend/schemas/` | Add repository upload request/response schemas |
+| `backend/api/routers/repository.py` | Add listing/detail/deactivation endpoints alongside the existing upload endpoint |
+| `backend/repositories/repository_package_repository.py` | Add read (`list_all`, `get_by_id`) and status-update (`deactivate`) operations |
+| `backend/services/repository_service.py` | Add REP-002 business logic (or a sibling service, if warranted) |
+| `backend/schemas/repository.py` | Add list/detail response schemas |
 
-### Key Decision for REP-001
+### Key Decision for REP-002
 
-Implement repository package management using the existing Repository → Service → Router architecture, extending `RepositoryPackageRepository` (introduced by INV-002) rather than creating a second repository for the same table.
+Implement repository package listing/removal using the existing Repository → Service → Router architecture, extending `RepositoryPackageRepository` and `RepositoryService` (both introduced/extended by REP-001) rather than creating competing modules for the same table.
 
-**Recommendation:** Treat `VersionComparisonService` as a stable consumer of `RepositoryPackageRepository.list_approved` — REP-001 should not need to modify INV-002's files at all; once approved packages exist in the database, comparison results populate automatically.
+**Recommendation:** Treat `RepositoryService.upload_package` and `VersionComparisonService` as stable, already-correct consumers/producers of `RepositoryPackageRepository` — REP-002 should not need to modify either's files at all; once a package listing/removal capability exists, both the upload endpoint and the version-comparison endpoint continue to behave exactly as before.
 ---
 
 *End of CURRENT_STATE.md*

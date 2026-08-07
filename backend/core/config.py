@@ -60,8 +60,16 @@ class Settings(BaseSettings):
     # the application as a list via `cors_origins_list`.
     CORS_ORIGINS: str = "*"
 
-    # --- Repository storage (reserved for REP-001 / REP-002) ---------------
+    # --- Repository storage (REP-001) ---------------------------------------
     REPOSITORY_DIR: Path = Path("repository")
+
+    # FR-006 Upload Validation Rules / FR-018 "Maximum installer upload
+    # size". Expressed in megabytes in the environment for readability;
+    # exposed to the application in bytes via
+    # `max_installer_upload_size_bytes` below. 500 MB comfortably covers
+    # typical Windows desktop application installers while still bounding
+    # worst-case disk/request usage for this prototype.
+    MAX_INSTALLER_UPLOAD_SIZE_MB: int = 500
 
     # --- Database (CPM-002) -------------------------------------------------
     # SQLite is the prototype default (Charter Section 8, SAD Section 6.4).
@@ -129,6 +137,11 @@ class Settings(BaseSettings):
         if self.REPOSITORY_DIR.is_absolute():
             return self.REPOSITORY_DIR
         return BASE_DIR / self.REPOSITORY_DIR
+
+    @property
+    def max_installer_upload_size_bytes(self) -> int:
+        """`MAX_INSTALLER_UPLOAD_SIZE_MB` expressed in bytes (FR-006/FR-018)."""
+        return self.MAX_INSTALLER_UPLOAD_SIZE_MB * 1024 * 1024
 
     @property
     def cors_origins_list(self) -> List[str]:

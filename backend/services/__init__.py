@@ -23,6 +23,10 @@ Implemented so far:
       item as Up-to-Date / Update Available / Not Managed against the
       approved repository catalog; computed on demand, not persisted -
       see that module's own design note).
+    * RepositoryService (REP-001) - FR-006 Software Repository Management
+      business logic (installer extension/installer-type validation,
+      duplicate-entry rejection, SHA-256 checksum computation, and
+      package metadata persistence).
 
 Together, AuthService and ClientAuthService implement the SAD's single
 "Authentication Module" (Section 9.4), which covers FR-002, FR-019, and
@@ -30,7 +34,6 @@ FR-020; they are split into two classes/files per FR/domain rather than
 one large class, per the Single Responsibility principle already applied
 throughout this package (SAD Section 10.14).
 
-Remaining services (Repository, Deployment, Configuration) are added by
-the tickets that introduce their respective domains (REP-*, DEPLOY-*,
-SYS-*).
+Remaining services (Deployment, Configuration) are added by the tickets
+that introduce their respective domains (DEPLOY-*, SYS-*).
 """

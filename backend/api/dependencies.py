@@ -26,6 +26,7 @@ from backend.services.client_auth_service import ClientAuthService
 from backend.services.client_service import ClientService
 from backend.services.heartbeat_service import HeartbeatService
 from backend.services.inventory_service import InventoryService
+from backend.services.repository_service import RepositoryService
 from backend.services.version_comparison_service import VersionComparisonService
 
 logger = logging.getLogger(__name__)
@@ -119,6 +120,19 @@ def get_version_comparison_service() -> VersionComparisonService:
 VersionComparisonServiceDependency = Annotated[
     VersionComparisonService, Depends(get_version_comparison_service)
 ]
+
+
+def get_repository_service() -> RepositoryService:
+    """
+    Build a ``RepositoryService`` (REP-001 - FR-006 installer package
+    upload business logic). Stateless, like every other service
+    constructed here.
+    """
+    return RepositoryService()
+
+
+# Reusable, typed dependency: injects a configured `RepositoryService`.
+RepositoryServiceDependency = Annotated[RepositoryService, Depends(get_repository_service)]
 
 
 def require_administrator(

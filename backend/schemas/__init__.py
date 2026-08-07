@@ -10,7 +10,9 @@ Implemented so far:
     * heartbeat.py (CLIENT-002) - client heartbeat request schema.
     * inventory.py (INV-001) - software inventory upload request schema.
     * updates.py (INV-002) - FR-007 version comparison response schemas.
+    * repository.py (REP-001) - FR-006 installer package upload metadata
+      request schema and repository package response schema.
 
-Remaining schemas (repository, deployment) are added by the tickets that
-introduce their respective endpoints (REP-*, DEPLOY-*).
+Remaining schemas (deployment) are added by the tickets that introduce
+their respective endpoints (DEPLOY-*).
 """
