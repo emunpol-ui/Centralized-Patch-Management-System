@@ -30,6 +30,20 @@ from backend.models.enums import ClientStatus
 class ClientRepository:
     """Data-access operations for the ``clients`` table."""
 
+    def get_by_id(self, db: Session, client_id: uuid.UUID) -> Client | None:
+        """
+        Return the ``Client`` with the given primary key, or ``None``.
+
+        Added by INV-002 (FR-007 Software Version Comparison) so its
+        administrator-facing endpoint can resolve a ``client_id`` path
+        parameter to a real ``Client`` before comparing its inventory,
+        the same "look up before acting" pattern used throughout this
+        codebase (e.g. ``get_by_agent_guid``, ``get_by_api_key_hash``).
+        Uses ``Session.get`` (primary-key lookup) rather than a ``select``
+        statement, since ``id`` is always the table's primary key.
+        """
+        return db.get(Client, client_id)
+
     def get_by_api_key_hash(self, db: Session, api_key_hash: str) -> Client | None:
         """
         Return the ``Client`` whose ``api_key_hash`` matches, or ``None``.

@@ -57,6 +57,26 @@ class DeploymentStatus(str, enum.Enum):
     CANCELLED = "Cancelled"
 
 
+class UpdateStatus(str, enum.Enum):
+    """
+    Software update status resulting from FR-007 Software Version
+    Comparison (PRS Section 4.3 FR-007 "Status Definitions").
+
+    This is a *derived*, computed-on-demand classification - unlike the
+    other enums in this module, no database column currently stores it
+    (see the design note in
+    ``backend.services.version_comparison_service`` for why comparison
+    results are not persisted). It is defined here anyway, alongside the
+    project's other status vocabularies, so schemas and services share a
+    single canonical set of values rather than each redeclaring string
+    literals.
+    """
+
+    UP_TO_DATE = "Up-to-Date"
+    UPDATE_AVAILABLE = "Update Available"
+    NOT_MANAGED = "Not Managed"
+
+
 class AuditSeverity(str, enum.Enum):
     """Audit log entry severity (PRS Section 7.5.6)."""
 

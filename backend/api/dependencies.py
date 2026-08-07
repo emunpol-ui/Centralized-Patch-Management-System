@@ -26,6 +26,7 @@ from backend.services.client_auth_service import ClientAuthService
 from backend.services.client_service import ClientService
 from backend.services.heartbeat_service import HeartbeatService
 from backend.services.inventory_service import InventoryService
+from backend.services.version_comparison_service import VersionComparisonService
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +104,21 @@ def get_inventory_service() -> InventoryService:
 
 # Reusable, typed dependency: injects a configured `InventoryService`.
 InventoryServiceDependency = Annotated[InventoryService, Depends(get_inventory_service)]
+
+
+def get_version_comparison_service() -> VersionComparisonService:
+    """
+    Build a ``VersionComparisonService`` (INV-002 - FR-007 version
+    comparison business logic). Stateless, like every other service
+    constructed here.
+    """
+    return VersionComparisonService()
+
+
+# Reusable, typed dependency: injects a configured `VersionComparisonService`.
+VersionComparisonServiceDependency = Annotated[
+    VersionComparisonService, Depends(get_version_comparison_service)
+]
 
 
 def require_administrator(

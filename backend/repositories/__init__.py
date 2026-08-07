@@ -16,8 +16,12 @@ Implemented so far:
       `backend/models/client_provisioning_key.py`.
     * SoftwareInventoryRepository (INV-001) - FR-005 inventory persistence
       (create / update / delete / list-for-client).
+    * RepositoryPackageRepository (INV-002) - minimal read-only slice
+      (`list_approved`) needed for FR-007 version comparison. Package
+      *upload*/maintenance (FR-006/FR-017) is deferred to REP-001, which
+      will extend this same repository rather than creating a competing
+      one.
 
-Remaining repositories (RepositoryPackage, Deployment, DeploymentTarget)
-are added by the tickets that introduce their respective domains (REP-*,
-DEPLOY-*).
+Remaining repositories (Deployment, DeploymentTarget) are added by the
+tickets that introduce their respective domains (DEPLOY-*).
 """

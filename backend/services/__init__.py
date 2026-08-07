@@ -18,6 +18,11 @@ Implemented so far:
     * InventoryService (INV-001) - FR-005 Software Inventory Upload
       business logic (insert / update / remove sync against the client's
       most recently uploaded inventory snapshot).
+    * VersionComparisonService (INV-002) - FR-007 Software Version
+      Comparison business logic (classifies each installed inventory
+      item as Up-to-Date / Update Available / Not Managed against the
+      approved repository catalog; computed on demand, not persisted -
+      see that module's own design note).
 
 Together, AuthService and ClientAuthService implement the SAD's single
 "Authentication Module" (Section 9.4), which covers FR-002, FR-019, and
