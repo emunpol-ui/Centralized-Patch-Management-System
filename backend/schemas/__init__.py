@@ -7,8 +7,9 @@ public request/response contract of the REST API.
 Implemented so far:
     * auth.py (AUTH-001) - administrator login request/response schemas.
     * client.py (CLIENT-001) - client registration request schema.
+    * heartbeat.py (CLIENT-002) - client heartbeat request schema.
+    * inventory.py (INV-001) - software inventory upload request schema.
 
-Remaining schemas (inventory, repository, deployment) are added by the
-tickets that introduce their respective endpoints (INV-*, REP-*,
-DEPLOY-*).
+Remaining schemas (repository, deployment) are added by the tickets that
+introduce their respective endpoints (REP-*, DEPLOY-*).
 """

@@ -15,6 +15,9 @@ Implemented so far:
       logic (create-or-update by Agent GUID).
     * HeartbeatService (CLIENT-002) - FR-003 Client Heartbeat business
       logic (last-seen timestamp + Online status updates).
+    * InventoryService (INV-001) - FR-005 Software Inventory Upload
+      business logic (insert / update / remove sync against the client's
+      most recently uploaded inventory snapshot).
 
 Together, AuthService and ClientAuthService implement the SAD's single
 "Authentication Module" (Section 9.4), which covers FR-002, FR-019, and
@@ -22,7 +25,7 @@ FR-020; they are split into two classes/files per FR/domain rather than
 one large class, per the Single Responsibility principle already applied
 throughout this package (SAD Section 10.14).
 
-Remaining services (Inventory, Repository, Deployment, Configuration) are
-added by the tickets that introduce their respective domains (INV-*,
-REP-*, DEPLOY-*, SYS-*).
+Remaining services (Repository, Deployment, Configuration) are added by
+the tickets that introduce their respective domains (REP-*, DEPLOY-*,
+SYS-*).
 """

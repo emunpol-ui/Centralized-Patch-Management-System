@@ -14,23 +14,10 @@ Implemented so far:
     * ClientProvisioningKeyRepository (CLIENT-001) - the minimal FR-020
       slice needed to unblock FR-001 registration; see
       `backend/models/client_provisioning_key.py`.
+    * SoftwareInventoryRepository (INV-001) - FR-005 inventory persistence
+      (create / update / delete / list-for-client).
 
-Remaining repositories (SoftwareInventory, RepositoryPackage, Deployment,
-DeploymentTarget) are added by the tickets that introduce their
-respective domains (INV-*, REP-*, DEPLOY-*).
-"""
-"""
-Pydantic schema (DTO) package.
-
-Per the DTO Pattern (SAD Section 5.8), schemas in this package define the
-public request/response contract of the REST API.
-
-Implemented so far:
-    * auth.py (AUTH-001) - administrator login request/response schemas.
-    * client.py (CLIENT-001) - client registration request schema.
-    * heartbeat.py (CLIENT-002) - client heartbeat request schema.
-
-Remaining schemas (inventory, repository, deployment) are added by the
-tickets that introduce their respective endpoints (INV-*, REP-*,
+Remaining repositories (RepositoryPackage, Deployment, DeploymentTarget)
+are added by the tickets that introduce their respective domains (REP-*,
 DEPLOY-*).
 """

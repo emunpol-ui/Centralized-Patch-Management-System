@@ -38,6 +38,22 @@ authenticated request from an *already-registered* client (unlike
 Layer Pattern; this handler stays thin (parse request, call service,
 shape response), consistent with every other router in this codebase.
 --------------------------------------------------------------------------
+
+--------------------------------------------------------------------------
+INV-001 ADDITION - ``POST /inventory/upload``
+
+Implements FR-005 Software Inventory Upload. PRS Appendix B documents this
+endpoint's path as ``/api/inventory/upload``; consistent with the path
+convention CLIENT-002 already established for ``/api/heartbeat`` above
+(centralizing every authenticated, already-registered-client endpoint
+under this router's ``/api/agent`` prefix so it automatically inherits
+router-wide API-key authentication), it is added here as
+``/api/agent/inventory/upload`` rather than as a literal, separate
+``/api/inventory/upload`` route. Business logic lives in
+``backend.services.inventory_service.InventoryService``, per the Service
+Layer Pattern; this handler stays thin, consistent with every other route
+on this router.
+--------------------------------------------------------------------------
 """
 
 from __future__ import annotations
@@ -51,9 +67,11 @@ from backend.api.dependencies import (
     CurrentClient,
     DBSessionDependency,
     HeartbeatServiceDependency,
+    InventoryServiceDependency,
     require_client_api_key,
 )
 from backend.schemas.heartbeat import HeartbeatRequest
+from backend.schemas.inventory import InventoryUploadRequest
 
 logger = logging.getLogger(__name__)
 
@@ -123,5 +141,47 @@ async def heartbeat(
             "hostname": updated.hostname,
             "status": updated.status.value,
             "last_heartbeat": updated.last_heartbeat.isoformat() if updated.last_heartbeat else None,
+        },
+    }
+
+
+@router.post(
+    "/inventory/upload",
+    status_code=status.HTTP_200_OK,
+    summary="Upload software inventory",
+    description=(
+        "Upload the authenticated Client Agent's current software inventory (FR-005). The uploaded "
+        "list is treated as the client's complete, current inventory snapshot: software not already "
+        "on record is added, software already on record is refreshed, and previously recorded "
+        "software absent from this upload is removed (see InventoryService for the full rationale)."
+    ),
+)
+async def upload_inventory(
+    current_client: CurrentClient,
+    db: DBSessionDependency,
+    inventory_service: InventoryServiceDependency,
+    payload: InventoryUploadRequest,
+) -> Dict[str, Any]:
+    """
+    Persist a software inventory upload for the authenticated Client Agent.
+
+    ``current_client`` is resolved (and thus already authenticated - see
+    ``require_client_api_key``) before this handler body runs. ``payload``
+    is validated by Pydantic (``InventoryUploadRequest`` - required field
+    lengths/types, per FR-005's "the server validates the inventory
+    format" step) before this handler is even invoked. All business logic
+    - matching, inserting, updating, removing, and audit logging - lives
+    in ``InventoryService.upload_inventory``.
+    """
+    result = inventory_service.upload_inventory(db, client=current_client, items=payload.items)
+    return {
+        "success": True,
+        "message": "Inventory uploaded successfully.",
+        "data": {
+            "client_id": str(current_client.id),
+            "record_count": result.total,
+            "created": result.created,
+            "updated": result.updated,
+            "removed": result.removed,
         },
     }

@@ -25,6 +25,7 @@ from backend.services.auth_service import AuthenticationError, AuthService
 from backend.services.client_auth_service import ClientAuthService
 from backend.services.client_service import ClientService
 from backend.services.heartbeat_service import HeartbeatService
+from backend.services.inventory_service import InventoryService
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +91,18 @@ def get_heartbeat_service() -> HeartbeatService:
 
 # Reusable, typed dependency: injects a configured `HeartbeatService`.
 HeartbeatServiceDependency = Annotated[HeartbeatService, Depends(get_heartbeat_service)]
+
+
+def get_inventory_service() -> InventoryService:
+    """
+    Build an ``InventoryService`` (INV-001 - FR-005 inventory upload
+    business logic). Stateless, like every other service constructed here.
+    """
+    return InventoryService()
+
+
+# Reusable, typed dependency: injects a configured `InventoryService`.
+InventoryServiceDependency = Annotated[InventoryService, Depends(get_inventory_service)]
 
 
 def require_administrator(

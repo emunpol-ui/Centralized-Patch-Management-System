@@ -24,3 +24,8 @@ alembic==1.18.5
 # releases (4.1+) removed, causing password hashing to fail outright.
 passlib==1.7.4
 bcrypt==4.0.1
+
+# --- Client Agent (INV-001) ---
+# HTTP client used by the Client Agent to upload software inventory to the
+# CPMS Server (SAD Section 6.7 "Requests Library").
+requests==2.32.3
