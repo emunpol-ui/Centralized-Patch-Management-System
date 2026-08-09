@@ -19,22 +19,28 @@ Validation Rules end-to-end:
     4. Metadata (including the computed checksum) is persisted only after
        the file has been fully and successfully written to disk.
 
-Package *approval workflow* changes and metadata *editing*/*removal*
-(FR-017 Repository Maintenance) are out of scope for this ticket
-(REP-001) and are not implemented here.
+Package *approval workflow* changes and metadata *editing* (FR-017
+Repository Maintenance) remain out of scope.
+
+Extended by REP-002 (Backlog "Repository Dashboard") with the read
+operations (``list_packages``, ``get_package``) and the removal operation
+(``deactivate_package``) the administrator-facing dashboard requires.
+Removal is implemented as a logical status change to ``INACTIVE`` (FR-017
+"removal" semantics), not a physical row delete - see the design note on
+``backend.models.repository_package.RepositoryPackage``.
 """
 
 from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import BinaryIO
+from typing import BinaryIO, List, Optional
 from uuid import UUID
 
 from sqlalchemy.orm import Session
 
 from backend.core.exceptions import AppException
-from backend.models.enums import AuditSeverity, InstallerType
+from backend.models.enums import ApprovalStatus, AuditSeverity, InstallerType
 from backend.models.repository_package import RepositoryPackage
 from backend.repositories.audit_log_repository import AuditLogRepository
 from backend.repositories.repository_package_repository import RepositoryPackageRepository
@@ -71,6 +77,16 @@ class RepositoryPackageConflictError(AppException):
             f"An approved repository package for '{software_name}' version '{version}' already exists.",
             status_code=409,
         )
+
+
+class RepositoryPackageNotFoundError(AppException):
+    """
+    Raised when a requested repository package id does not exist
+    (Backlog REP-002 "Package details" / "Delete" deliverables).
+    """
+
+    def __init__(self, package_id: UUID) -> None:
+        super().__init__(f"Repository package '{package_id}' was not found.", status_code=404)
 
 
 class RepositoryService:
@@ -188,6 +204,82 @@ class RepositoryService:
             software_name,
             version,
             file_size,
+            admin_id,
+        )
+        return package
+
+    def list_packages(
+        self,
+        db: Session,
+        *,
+        search: Optional[str] = None,
+        approval_status: Optional[ApprovalStatus] = None,
+    ) -> List[RepositoryPackage]:
+        """
+        Return repository packages for the administrator dashboard
+        listing (Backlog REP-002 "Repository page" / "Search"
+        deliverables), optionally filtered by a free-text ``search`` term
+        (matched against software name/version) and/or ``approval_status``.
+
+        This is a read-only operation; no audit log entry is recorded,
+        consistent with ``VersionComparisonService``'s existing "read-only
+        query, not a state-changing operation" rationale (see
+        CURRENT_STATE.md's Logging Standards note).
+        """
+        return self._packages.list_all(db, search=search, approval_status=approval_status)
+
+    def get_package(self, db: Session, package_id: UUID) -> RepositoryPackage:
+        """
+        Return a single repository package by id (Backlog REP-002
+        "Package details" deliverable).
+
+        Raises:
+            ``RepositoryPackageNotFoundError`` (404) - no package exists
+            with the given id.
+        """
+        package = self._packages.get_by_id(db, package_id)
+        if package is None:
+            raise RepositoryPackageNotFoundError(package_id)
+        return package
+
+    def deactivate_package(self, db: Session, *, admin_id: UUID, package_id: UUID) -> RepositoryPackage:
+        """
+        Deactivate (FR-017 "remove") an existing repository package
+        (Backlog REP-002 "Delete" deliverable).
+
+        Sets ``approval_status = INACTIVE`` rather than physically
+        deleting the row, preserving package history and any existing
+        ``Deployment`` relationships. Deactivating an already-``INACTIVE``
+        package is idempotent - it is re-persisted as ``INACTIVE`` without
+        error, so a repeated or racing delete request does not fail.
+
+        Raises:
+            ``RepositoryPackageNotFoundError`` (404) - no package exists
+            with the given id.
+        """
+        package = self.get_package(db, package_id)
+        already_inactive = package.approval_status == ApprovalStatus.INACTIVE
+
+        package = self._packages.deactivate(db, package)
+
+        if not already_inactive:
+            self._audit_logs.create(
+                db,
+                event_type="REPOSITORY_PACKAGE_DEACTIVATED",
+                severity=AuditSeverity.INFO,
+                description=(
+                    f"Repository package '{package.software_name}' version '{package.version}' "
+                    f"(id={package.id}) deactivated."
+                ),
+                admin_id=admin_id,
+            )
+        db.commit()
+
+        logger.info(
+            "Repository package %s (%s v%s) deactivated by administrator %s.",
+            package.id,
+            package.software_name,
+            package.version,
             admin_id,
         )
         return package

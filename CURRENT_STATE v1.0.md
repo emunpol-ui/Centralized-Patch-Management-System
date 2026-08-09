@@ -1,7 +1,7 @@
 # CURRENT_STATE.md
 
-**Version:** 0.9  
-**Last Updated:** August 7, 2026
+**Version:** 1.0  
+**Last Updated:** August 9, 2026
 
 ---
 
@@ -23,7 +23,7 @@ A proof-of-concept centralized software patch management system for Windows comp
 | Frontend | Bootstrap 5 (Jinja2 Templates not yet wired) |
 |Client Agent | Inventory collection scaffolding implemented (server-side inventory upload complete)|
 | Authentication | Admin: Session + CSRF cookie; Client: Bearer API Key (SHA-256) |
-| Deployment | Local Package Repository (upload implemented — REP-001; deployment execution not yet implemented) |
+| Deployment | Local Package Repository (upload + administrator dashboard listing/search/details/deactivation implemented — REP-001, REP-002; deployment execution not yet implemented) |
 | File Handling | `python-multipart` (installer upload parsing), SHA-256 (`hashlib`, standard library) |
 
 ### Architecture
@@ -58,7 +58,7 @@ backend/
 │   │   ├── agent.py               # Protected agent endpoints (ping, heartbeat, inventory upload)
 │   │   ├── registration.py        # POST /api/register (CLIENT-001)
 │   │   ├── updates.py             # Admin version-comparison endpoint (INV-002)
-│   │   └── repository.py          # Admin installer upload endpoint (REP-001)
+│   │   └── repository.py          # Admin installer upload (REP-001) + list/detail/deactivate (REP-002)
 │   └── dependencies.py            # DI providers (admin + client + services)
 ├── core/
 │   ├── config.py                  # Extended (REP-001): MAX_INSTALLER_UPLOAD_SIZE_MB
@@ -90,6 +90,7 @@ backend/
 │   ├── client_provisioning_key_repository.py
 │   ├── software_inventory_repository.py   # INV-001 inventory persistence
 │   └── repository_package_repository.py   # Extended (REP-001): create, get_active_conflict
+│                                           # Extended (REP-002): list_all, get_by_id, deactivate
 ├── services/
 │   ├── auth_service.py
 │   ├── client_auth_service.py
@@ -97,7 +98,7 @@ backend/
 │   ├── heartbeat_service.py
 │   ├── inventory_service.py               # Inventory synchronization service
 │   ├── version_comparison_service.py      # FR-007 version comparison business logic (INV-002)
-│   └── repository_service.py              # FR-006 installer upload business logic (REP-001)
+│   └── repository_service.py              # FR-006 installer upload (REP-001) + list/get/deactivate (REP-002)
 ├── utils/
 │   ├── version_compare.py                 # FR-007 name/version matching + comparison rules (INV-002)
 │   └── file_storage.py                    # FR-006 extension validation, SHA-256 hashing, file streaming (REP-001)
@@ -106,7 +107,8 @@ backend/
     ├── client.py
     ├── inventory.py                       # Inventory upload request schemas
     ├── updates.py                         # Version comparison response schemas (INV-002)
-    └── repository.py                      # Installer upload metadata + response schemas (REP-001)
+    └── repository.py                      # Upload metadata + response schemas (REP-001); list response,
+                                            # created_at/updated_at fields (REP-002)
 
 agent/                                     # Client Agent (initial implementation)
 ├── communication/                         # Server communication helpers
@@ -129,9 +131,9 @@ tests/                                     # Empty skeleton (no pytest configure
 
 | Metric                    | Status                                          |
 | ------------------------- | ------------------------------------------------ |
-| **Current Version**       | v0.9                                            |
-| **Development Stage**     | REP-002 — Repository Dashboard (not yet started)|
-| **Latest Stable Release** | REP-001 — Repository Management                 |
+| **Current Version**       | v1.0                                            |
+| **Development Stage**     | DEPLOY-001 — Deployment Creation (not yet started)|
+| **Latest Stable Release** | REP-002 — Repository Dashboard                  |
 | **Repository Status**     | Active Development                              |
 | **Architecture Status**   | Stable                                          |
 | **Regression Status**     | No known regressions from completed tickets     |
@@ -149,16 +151,17 @@ tests/                                     # Empty skeleton (no pytest configure
 | v0.7    | INV-001 — Inventory Collection                        |
 | v0.8    | INV-002 — Version Comparison                          |
 | v0.9    | REP-001 — Repository Management                       |
+| v1.0    | REP-002 — Repository Dashboard                        |
 
 ### Current Ticket
 
-**REP-002 — Repository Dashboard** (not yet started)
+**REP-002 — Repository Dashboard** ✅ Complete
 
 ### Next Ticket
 
-**REP-002 — Repository Dashboard**
+**DEPLOY-001 — Deployment Creation**
 
-**Purpose:** Provide an administrator-facing view of uploaded repository packages (list, search, delete/deactivate, package details).
+**Purpose:** Allow an administrator to create deployment jobs targeting one or more registered clients (FR-008, FR-009), building on the now-complete repository package catalog (REP-001, REP-002) and version comparison (INV-002).
 
 ---
 
@@ -472,6 +475,59 @@ Database Persistence
 **Important Note:** No database schema or migration changes were required — `RepositoryPackage` (defined by CORE-002) already had every column this ticket needed (`checksum`, `file_size`, `installer_filename`, `silent_command`, `installer_type`, `approval_status`). REP-001 is upload-only: metadata *editing* and *removal* (FR-017 Repository Maintenance) and a package-listing/browse view (REP-002 Repository Dashboard) remain unimplemented.
 
 ---
+
+### REP-002 — Repository Dashboard
+
+| Status | ✅ Production Ready |
+
+**Objective:** Implement the administrator-facing Repository Dashboard (Backlog REP-002, FR-006 dashboard integration / FR-017 Repository Maintenance): allow an administrator to view uploaded repository packages, search/filter them, view package details, and delete (deactivate) a package.
+
+**Features Implemented:**
+
+- `RepositoryPackageRepository` (introduced by INV-002, extended by REP-001) extended with:
+  - `list_all` — returns repository packages, optionally filtered by a case-insensitive substring `search` against `software_name`/`version` and/or by `approval_status` (`Approved`/`Inactive`); results ordered by `software_name`, then `version`
+  - `get_by_id` — resolves a single package by primary key, or `None`
+  - `deactivate` — sets `approval_status = INACTIVE` on an existing package and flushes the change (FR-017 "removal" semantics — a logical status change, **not** a physical row delete)
+- `RepositoryService` (introduced by REP-001) extended with:
+  - `list_packages(db, search=..., approval_status=...)` — read-only, delegates to `RepositoryPackageRepository.list_all`; no audit log entry recorded (read-only query, matching `VersionComparisonService`'s existing rationale — see Logging Standards)
+  - `get_package(db, package_id)` — returns a single package or raises `RepositoryPackageNotFoundError` (404)
+  - `deactivate_package(db, admin_id=..., package_id=...)` — resolves the package (404 if missing), deactivates it, records an audit log entry (`REPOSITORY_PACKAGE_DEACTIVATED`, INFO) unless the package was already `Inactive` (idempotent re-deactivation does not double-log), and commits
+  - New exception: `RepositoryPackageNotFoundError` (`AppException`, 404)
+- `backend/schemas/repository.py` extended:
+  - `RepositoryPackageResponse` gained `created_at` / `updated_at` fields (already present on the ORM model via `AuditModel`; `created_at` doubles as the PRS's `upload_date`) so the detail/list views can surface upload and last-modified timestamps
+  - New `RepositoryPackageListResponse` (`packages: list[RepositoryPackageResponse]`, `total: int`) wrapping the listing endpoint's response body; reuses `RepositoryPackageResponse` for each item rather than introducing a second, overlapping DTO
+- Three new administrator-facing endpoints added to the existing `backend/api/routers/repository.py` (alongside REP-001's unmodified upload endpoint):
+  - `GET /api/admin/repository/packages` — list/search packages; optional `search` and `approval_status` query parameters; read-only, `CurrentAdministrator` only (no CSRF — NFR-028 scopes CSRF to state-changing requests, matching the existing pattern on `GET /api/admin/clients/{client_id}/updates`)
+  - `GET /api/admin/repository/packages/{package_id}` — package details; read-only, `CurrentAdministrator` only; 404 via `RepositoryPackageNotFoundError` for an unknown id
+  - `POST /api/admin/repository/packages/{package_id}/deactivate` — deactivate ("delete") a package; state-changing, `CurrentAdministrator` **and** `CSRFProtection`, the same pattern already used by the upload endpoint
+
+**Design Decisions (Documented):**
+
+- **Deletion = deactivation, not a row delete:** Per the existing `ApprovalStatus.INACTIVE` semantics already defined by CORE-002/REP-001 and documented on `RepositoryPackage`/`ApprovalStatus`, "delete" is implemented purely as `approval_status → INACTIVE`. This was a pre-existing design decision in the baseline (not introduced by this ticket) and is simply reused. An `INACTIVE` package continues to satisfy `Deployment.repository_id` referential integrity and is automatically excluded from `list_approved`/`get_active_conflict` (both already status-filtered), so `VersionComparisonService` and duplicate-upload detection required no changes.
+- **Idempotent deactivation:** Re-deactivating an already-`Inactive` package succeeds (200) rather than erroring, and does not write a second audit log entry for the same transition — a reasonable behavior for a "delete" action a dashboard user might click more than once, and consistent with not treating a repeated no-op as a new administrative event.
+- **Listing scope:** `list_all` returns packages of *any* status by default (not just `Approved`) so the administrator can review previously deactivated packages from the same dashboard view; `approval_status` is an optional filter for narrowing to one status at a time. This differs intentionally from `list_approved` (INV-002/REP-001), which remains unchanged and continues to return only `Approved` packages for version-comparison/duplicate-detection purposes.
+- **Search implementation:** A simple case-insensitive `LIKE`/`ilike` substring match against `software_name` and `version`, appropriate for the current SQLite-backed proof-of-concept scope — no full-text search engine or additional index was introduced.
+- **No new database schema/migration:** `RepositoryPackage` (CORE-002) already had every column REP-002's listing/detail/deactivation needed; `created_at`/`updated_at` were already present via `AuditModel` and simply had not yet been exposed through `RepositoryPackageResponse`.
+- **No frontend templates added:** The repository (`backend/templates/`, `backend/static/`) contains no wired Jinja2 templates as of v0.9/v1.0 (per CURRENT_STATE's existing "No frontend UI" note, unchanged by this ticket). REP-002 was implemented as the three API endpoints above, consistent with the project's current API-first, dashboard-templates-not-yet-wired state; a future dashboard-templating ticket can consume these endpoints without further backend changes.
+
+**Manual/Scripted Verification (via `TestClient` against a full FastAPI app + real SQLite database):**
+
+- ✅ `GET /api/admin/repository/packages` returns all uploaded packages with `total` matching the returned count
+- ✅ `search` query parameter correctly narrows results by software name/version substring (case-insensitive)
+- ✅ `approval_status` query parameter correctly restricts results to `Approved`-only or `Inactive`-only
+- ✅ `GET /api/admin/repository/packages/{package_id}` returns full package metadata (including `created_at`/`updated_at`) for an existing package
+- ✅ `GET /api/admin/repository/packages/{package_id}` returns `404` for an unknown package id
+- ✅ `POST /api/admin/repository/packages/{package_id}/deactivate` without a CSRF token: rejected `403 Forbidden`
+- ✅ `POST /api/admin/repository/packages/{package_id}/deactivate` with a valid session + CSRF token: `200 OK`, `approval_status` becomes `"Inactive"`
+- ✅ A deactivated package is excluded from `GET .../packages?approval_status=Approved` and included under `approval_status=Inactive`
+- ✅ Deactivated package row remains present in the database (not physically deleted) — verified via direct query
+- ✅ Full application import and OpenAPI schema generation confirmed all three new routes register correctly alongside the existing upload endpoint
+- ✅ `pyflakes` reports no warnings across all new/modified files
+- ✅ No regressions detected in CORE-001, CORE-002, AUTH-001, AUTH-002, CLIENT-001, CLIENT-002, INV-001, INV-002, or REP-001 — `RepositoryService.upload_package`, `VersionComparisonService`, `RepositoryPackageRepository.list_approved`/`get_active_conflict`/`create`, and every existing endpoint were not behaviorally modified
+
+**Important Note:** REP-002 is API-only, matching the current state of the project's frontend (no Jinja2 templates wired yet). Metadata *editing* (e.g. changing an uploaded package's silent install command) remains unimplemented and out of scope, as it was not part of this ticket's deliverables.
+
+---
 ## Current System State
 
 ### APIs Available (Implemented)
@@ -485,6 +541,9 @@ Database Persistence
 | POST   | `/api/admin/keys`                         | Issue client provisioning key (FR-020)                   | Admin session + CSRF                  |
 | GET    | `/api/admin/clients/{client_id}/updates`  | Compare a client's inventory against the repository (FR-007) | Admin session                     |
 | POST   | `/api/admin/repository/packages`          | Upload an approved installer package (FR-006)             | Admin session + CSRF                  |
+| GET    | `/api/admin/repository/packages`          | List/search repository packages (FR-006, REP-002)         | Admin session                         |
+| GET    | `/api/admin/repository/packages/{package_id}` | Retrieve a single repository package's details (REP-002) | Admin session                     |
+| POST   | `/api/admin/repository/packages/{package_id}/deactivate` | Deactivate ("remove") a repository package (FR-017, REP-002) | Admin session + CSRF          |
 | POST   | `/api/register`                           | Client registration                                       | Provisioning key or existing API key  |
 | GET    | `/api/agent/ping`                         | Verify client authentication                              | Client API key                        |
 | POST   | `/api/agent/heartbeat`                    | Report client heartbeat                                   | Client API key                        |
@@ -496,8 +555,9 @@ Database Persistence
 - Tables: `administrators`, `administrator_sessions`, `clients`, `client_provisioning_keys`, `software_inventories`, `repository_packages`, `deployments`, `deployment_targets`, `audit_logs`, `alembic_version`
 - All models use UUID primary keys
 - Relationships and constraints defined
-- Audit logging integrated for all authentication, registration, and repository upload events
+- Audit logging integrated for all authentication, registration, repository upload, and repository deactivation events
 - **No schema changes in REP-001** — `repository_packages` already had every column this ticket needed (CORE-002); no migration was added
+- **No schema changes in REP-002** — the listing, detail, and deactivation operations use only existing `repository_packages` columns (including `created_at`/`updated_at`, already present via `AuditModel`); no migration was added
 
 ### Authentication Status
 
@@ -507,6 +567,7 @@ Database Persistence
 - Sliding inactivity expiry
 - `Secure` flag configurable (`SESSION_COOKIE_SECURE`, default `False` for HTTP-only prototype — **must set `True` for HTTPS**)
 - `POST /api/admin/repository/packages` (REP-001) requires both the session cookie and a valid CSRF token, consistent with every other state-changing administrator endpoint
+- `POST /api/admin/repository/packages/{package_id}/deactivate` (REP-002) likewise requires both the session cookie and a valid CSRF token; `GET /api/admin/repository/packages` and `GET /api/admin/repository/packages/{package_id}` (REP-002) are read-only and require only the session cookie, consistent with `GET /api/admin/clients/{client_id}/updates` (INV-002)
 
 **Client:**
 
@@ -536,6 +597,22 @@ Database Persistence
    → GET /api/admin/clients/{client_id}/updates
    └── Newly uploaded packages are picked up automatically —
        VersionComparisonService and this endpoint were not modified
+
+4. Administrator browses/searches the repository (New — REP-002)
+   → GET /api/admin/repository/packages[?search=...&approval_status=...]
+   └── Returns packages ordered by software_name, then version
+
+5. Administrator views a package's full details (New — REP-002)
+   → GET /api/admin/repository/packages/{package_id}
+   └── Returns metadata including checksum, silent_command,
+       approval_status, created_at, updated_at
+
+6. Administrator removes an obsolete package (New — REP-002)
+   → POST /api/admin/repository/packages/{package_id}/deactivate
+   ├── approval_status: Approved → Inactive (logical removal, FR-017)
+   ├── Package row and any Deployment relationships preserved
+   └── Package immediately excluded from list_approved / duplicate
+       detection / version comparison (no changes required to either)
 ```
 
 ### Client Workflow (Unchanged from v0.8)
@@ -571,7 +648,7 @@ Database Persistence
 
 ## Deployment Workflow (Not Yet Implemented)
 
-- Local Package Repository: **upload implemented (REP-001)** — repository listing/browse (REP-002) and deployment execution (DEPLOY-*) remain not yet implemented
+- Local Package Repository: **upload implemented (REP-001)**, **administrator listing/search/details/deactivation implemented (REP-002)** — deployment execution (DEPLOY-*) remains not yet implemented
 - Silent Installers: not yet executed by a deployment (silent command is validated and stored at upload time; execution belongs to DEPLOY-003 client-side work, already partially anticipated by the existing FR-011 direct-process-execution design)
 - SHA-256 Package Validation: **upload-time computation now implemented** (REP-001, `RepositoryPackage.checksum`); download-time re-verification by the Client Agent (FR-010/FR-011) remains part of future DEPLOY-* tickets
 
@@ -579,8 +656,8 @@ Database Persistence
 
 - **No automated test framework** configured (`pytest` not in `requirements.txt`; `tests/` directory remains an empty skeleton). All verification is currently performed through manual API testing, PowerShell scripts, direct SQLite inspection, and (for INV-002/REP-001) ad hoc scripted verification using FastAPI's `TestClient`.
 - **No scheduler/background tasks** — client `OFFLINE` status is currently computed at read time rather than maintained by a background service. Version comparison (INV-002) follows this same "computed at read time" pattern.
-- **Repository package listing endpoint not yet implemented** — packages can be uploaded (REP-001) but there is no `GET` endpoint to list/browse them yet; that is REP-002's "Repository Dashboard" deliverable. Uploaded packages are, however, immediately visible indirectly through `GET /api/admin/clients/{client_id}/updates` once a client has matching inventory.
-- **No administrator-facing inventory or client listing endpoints** — client registration and software inventory data are stored successfully and can be compared against the repository (INV-002) and now populated via real uploads (REP-001), but there is still no general "list clients" or "list inventory" endpoint. These capabilities remain planned for a future dashboard-facing ticket.
+- **Repository package listing/detail/deactivation implemented (REP-002)** — `GET /api/admin/repository/packages` (list/search), `GET /api/admin/repository/packages/{package_id}` (details), and `POST /api/admin/repository/packages/{package_id}/deactivate` (remove) are all available. Metadata *editing* (e.g. changing the silent install command after upload) remains unimplemented.
+- **No administrator-facing inventory or client listing endpoints** — client registration and software inventory data are stored successfully and can be compared against the repository (INV-002) and now populated via real uploads (REP-001) and browsed via the repository dashboard endpoints (REP-002), but there is still no general "list clients" or "list inventory" endpoint. These capabilities remain planned for a future dashboard-facing ticket.
 - **Client Agent scaffolding implemented** — communication layer, inventory scanner, and application entry point exist; automated Windows Registry inventory collection will be exercised through the deployed Windows Agent in future milestones.
 - **No frontend UI** (Jinja2 templates not yet wired; HTMX optional and not yet implemented).
 - **No CORS configuration for credentialed cross-origin clients** — `CORS_ORIGINS` currently defaults to `"*"` with `allow_credentials=True`, which browsers reject. This is acceptable for the current same-origin prototype but will require explicit origin configuration before introducing a separate frontend.
@@ -682,12 +759,22 @@ Database Persistence
 | **Regression**   | Passed (`TestClient`-based end-to-end verification of success, duplicate-conflict, extension-mismatch, invalid-silent-command, missing-CSRF, and unauthenticated scenarios; `pyflakes` clean; no existing files behaviorally modified beyond the additive `RepositoryPackageRepository` methods) |
 
 ---
+
+### REP-002 — Repository Dashboard
+
+| Status           | ✅ Production Ready                                                                                                                                         |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Purpose**      | Provide administrator-facing management of uploaded repository packages: list/browse, search, view package details, and remove (deactivate) obsolete packages (FR-006 dashboard integration, FR-017 Repository Maintenance) |
+| **Deliverables** | `RepositoryPackageRepository.list_all`/`get_by_id`/`deactivate`, `RepositoryService.list_packages`/`get_package`/`deactivate_package`, `RepositoryPackageNotFoundError`, `RepositoryPackageListResponse`, `RepositoryPackageResponse.created_at`/`updated_at`, `GET /api/admin/repository/packages`, `GET /api/admin/repository/packages/{package_id}`, `POST /api/admin/repository/packages/{package_id}/deactivate` |
+| **Design Decisions** | Removal implemented as a logical `approval_status → INACTIVE` change (reusing the pre-existing status field/semantics), not a physical delete; deactivation is idempotent; listing returns packages of any status by default with an optional status filter; search is a simple case-insensitive substring match on name/version; no new database schema or migration required |
+| **Regression**   | Passed (`TestClient`-based end-to-end verification of listing, search, status filtering, package details, not-found handling, missing-CSRF rejection, and successful deactivation; `pyflakes` clean; `RepositoryService.upload_package`, `VersionComparisonService`, and `RepositoryPackageRepository.list_approved`/`get_active_conflict`/`create` were not behaviorally modified) |
+
+---
 ## Pending Backlog
 
 | Ticket | Purpose | Dependencies | Priority |
 |--------|---------|--------------|----------|
-| **REP-002** | Repository Dashboard — manage repository packages | REP-001 | Next |
-| **DEPLOY-001** | Deployment Creation — create deployment tasks | INV-002 (Version Comparison) | - |
+| **DEPLOY-001** | Deployment Creation — create deployment tasks | INV-002 (Version Comparison), REP-002 (Repository Dashboard) | Next |
 | **DEPLOY-002** | Agent Polling — clients poll for deployments | DEPLOY-001 | - |
 | **DEPLOY-003** | Installer Download & Execution — client-side | DEPLOY-002 | - |
 | **DEPLOY-004** | Deployment Status Reporting — client reports completion | DEPLOY-003 | - |
@@ -878,23 +965,25 @@ Database Persistence
 
 ## Next Recommended Work
 
-### REP-002 — Repository Dashboard
+### DEPLOY-001 — Deployment Creation
 
-**Purpose:** Provide administrator-facing management of uploaded repository packages: list/browse, search, view package details, and remove (deactivate) obsolete packages (FR-006 dashboard integration, FR-017 Repository Maintenance).
+**Purpose:** Allow the System Administrator to create deployment jobs targeting one or more registered client computers (FR-008, FR-009), building on the now-complete repository catalog (REP-001 upload, REP-002 dashboard) and version comparison (INV-002).
 
-**Expected Deliverables:**
+**Expected Deliverables (per Backlog):**
 
-- `GET /api/admin/repository/packages` — list all repository packages (likely both `APPROVED` and `INACTIVE`, or filterable by status)
-- `GET /api/admin/repository/packages/{package_id}` — package detail view
-- `POST /api/admin/repository/packages/{package_id}/deactivate` (or similar) — FR-017 "removal" via `approval_status = INACTIVE`, **not** a physical row delete (see the design note on `backend.models.repository_package.RepositoryPackage` re: `Deployment.repository_id` referential integrity)
-- Extend `RepositoryPackageRepository` with the necessary read operations (`list_all`, `get_by_id`) and a `deactivate`/`update_status` write operation
+- Deployment creation API (`POST` endpoint under `/api/admin`, session + CSRF protected, matching the existing administrator-endpoint pattern)
+- Target client selection (one or more registered, non-terminal-deployment clients per Business Rule 9, PRS §2.7)
+- A shared `batch_id` per multi-client deployment request, with one `DeploymentTarget`/deployment-job record created per targeted client (PRS FR-008)
+- Deployment job persistence (`Deployment`/`DeploymentTarget` models — already defined by CORE-002, unused until now)
+- Initial deployment status `Pending`
 
 **Notes for Implementer:**
 
-- Reuse the existing `RepositoryPackageRepository` (extended by INV-002 and REP-001); add further methods rather than creating a second, competing repository.
-- Do **not** modify `VersionComparisonService`, `GET /api/admin/clients/{client_id}/updates`, or `RepositoryService.upload_package` unless a defect is discovered.
-- Follow the existing Repository → Service → Router architecture, and the same `CurrentAdministrator` (+ `CSRFProtection` for any state-changing action) authorization pattern already used by `POST /api/admin/repository/packages`.
-- No scheduler or background services are required.
+- Reuse the existing `RepositoryPackageRepository`/`RepositoryService` (now including REP-002's `get_package`) to resolve and validate the selected package; a package must be `Approved` (not `Inactive`) to be deployable — REP-002's deactivation already guarantees `list_approved`/`get_active_conflict` exclude `Inactive` packages, so DEPLOY-001 should apply the same `Approved`-only constraint when accepting a deployment target package.
+- Reuse the existing `ClientRepository` to validate target clients exist and are registered.
+- Introduce a new `DeploymentRepository`/`DeploymentTargetRepository` and `DeploymentService`, following the same Repository → Service → Router layering as every other completed ticket — do not extend `RepositoryPackageRepository`/`RepositoryService` for deployment-specific logic, since `Deployment`/`DeploymentTarget` are distinct entities (PRS §7.5.4/§7.5.5).
+- Do **not** modify `RepositoryService`, `RepositoryPackageRepository`, or `VersionComparisonService` beyond what is strictly required to read an approved package for deployment targeting.
+- No scheduler or background services are required for job *creation* (DEPLOY-002 agent polling is a separate, later ticket).
 
 ---
 
@@ -913,10 +1002,10 @@ Database Persistence
 | Inventory Collection | ✅ Production Ready |
 | Version Comparison | ✅ Production Ready |
 | Repository Management (Upload) | ✅ Production Ready (REP-001) |
+| Repository Dashboard (Listing/Search/Details/Removal) | ✅ Production Ready (REP-002) |
 | Client Agent | ⚠ Agent scaffolding implemented (automatic registry scanning pending deployment) |
-| Repository Dashboard (Listing/Removal) | ❌ Not yet implemented (REP-002 — current next ticket) |
-| Deployment | ❌ Not yet implemented |
-| Frontend Dashboard | ❌ Not yet implemented |
+| Deployment | ❌ Not yet implemented (DEPLOY-001 — current next ticket) |
+| Frontend Dashboard | ❌ Not yet implemented (all dashboard functionality is API-only so far) |
 
 ### Current Architecture (Summary)
 
@@ -928,6 +1017,7 @@ Database Persistence
 - Software inventory snapshot synchronization implemented
 - Version comparison against the approved repository catalog implemented, computed on demand (not persisted)
 - Repository package upload implemented: SHA-256 checksum computed at upload time, server-generated storage filenames, duplicate-entry rejection
+- Repository package dashboard implemented: administrator-facing list/search (by name/version, optional status filter), package detail retrieval, and deactivation (logical removal via `approval_status = INACTIVE`, not a physical delete)
 - Client Agent scaffolding prepared for automated Windows Registry inventory collection
 
 ### Completed Modules (Do Not Redesign)
@@ -941,38 +1031,45 @@ Database Persistence
 - INV-001: Inventory Collection
 - INV-002: Version Comparison
 - REP-001: Repository Management (Upload)
+- REP-002: Repository Dashboard (Listing/Search/Details/Deactivation)
 
 ### Current Blockers
 
 - No automated test framework (manual verification only)
 - No scheduler/background task infrastructure
-- No administrator dashboard for viewing uploaded inventory, repository packages, or comparison results (API-only so far)
-- No repository package listing/browse endpoint yet (REP-002)
-- No deployment management module
+- No administrator dashboard **UI** for viewing uploaded inventory, repository packages, or comparison results (all such functionality is API-only so far — REP-002 added the repository-package API surface, but no Jinja2 templates are wired yet)
+- No deployment management module (DEPLOY-001 through DEPLOY-004 remain unimplemented)
+- No admin-facing "list clients" or "list inventory" endpoints yet (planned for a future dashboard-facing ticket)
 
 ### Immediate Next Task
 
-**REP-002 — Repository Dashboard**
+**DEPLOY-001 — Deployment Creation**
 
-- Implement repository package listing/browse and detail endpoints
-- Implement FR-017 "removal" as a status change to `INACTIVE` (not a physical delete)
-- Extend the existing `RepositoryPackageRepository` (extended by INV-002 and REP-001) with the needed read/status-update operations
-- Keep `RepositoryService.upload_package`, `VersionComparisonService`, and their endpoints unmodified unless a defect is discovered
+- Implement deployment job creation targeting one or more registered clients (FR-008, FR-009)
+- Validate the selected repository package is `Approved` (reuse `RepositoryService.get_package`/`RepositoryPackageRepository`, do not duplicate this logic)
+- Validate target clients are registered and do not already have an active (non-terminal) deployment job (PRS Business Rule 9, §2.7)
+- Introduce a new `DeploymentRepository`/`DeploymentTargetRepository` and `DeploymentService`, following the established Repository → Service → Router architecture
+- Keep `RepositoryService`, `RepositoryPackageRepository`, and `VersionComparisonService` unmodified unless a defect is discovered
 
 ### Files Likely to Be Modified
 
 | File | Reason |
 |------|--------|
-| `backend/api/routers/repository.py` | Add listing/detail/deactivation endpoints alongside the existing upload endpoint |
-| `backend/repositories/repository_package_repository.py` | Add read (`list_all`, `get_by_id`) and status-update (`deactivate`) operations |
-| `backend/services/repository_service.py` | Add REP-002 business logic (or a sibling service, if warranted) |
-| `backend/schemas/repository.py` | Add list/detail response schemas |
+| `backend/api/routers/deployments.py` (new) | Deployment creation endpoint(s) |
+| `backend/repositories/deployment_repository.py` (new) | Deployment/DeploymentTarget data access |
+| `backend/services/deployment_service.py` (new) | DEPLOY-001 business logic (target validation, batch_id generation, job creation) |
+| `backend/schemas/deployment.py` (new) | Deployment creation request/response schemas |
+| `backend/api/dependencies.py` | Add a `DeploymentServiceDependency` provider, following the existing per-service DI factory pattern |
+| `backend/main.py` | Register the new deployment router |
 
-### Key Decision for REP-002
+### Key Decision for REP-002 (Completed)
 
-Implement repository package listing/removal using the existing Repository → Service → Router architecture, extending `RepositoryPackageRepository` and `RepositoryService` (both introduced/extended by REP-001) rather than creating competing modules for the same table.
+Repository package listing/removal was implemented using the existing Repository → Service → Router architecture, extending `RepositoryPackageRepository` and `RepositoryService` (both introduced/extended by REP-001) rather than creating competing modules for the same table. `RepositoryService.upload_package` and `VersionComparisonService` were treated as stable, already-correct consumers/producers of `RepositoryPackageRepository` and were not modified — both the upload endpoint and the version-comparison endpoint continue to behave exactly as before REP-002.
 
-**Recommendation:** Treat `RepositoryService.upload_package` and `VersionComparisonService` as stable, already-correct consumers/producers of `RepositoryPackageRepository` — REP-002 should not need to modify either's files at all; once a package listing/removal capability exists, both the upload endpoint and the version-comparison endpoint continue to behave exactly as before.
+### Key Decision for DEPLOY-001 (Upcoming)
+
+Introduce dedicated `Deployment`/`DeploymentTarget` repository and service modules rather than extending `RepositoryPackageRepository`/`RepositoryService` — deployment jobs are a distinct entity from repository packages (PRS §7.5.4/§7.5.5), and mixing deployment-creation logic into the repository-package service would blur the Single Responsibility boundary the project has maintained through every ticket so far (see SAD §10.14 Service Design Principles).
+
 ---
 
 *End of CURRENT_STATE.md*

@@ -16,14 +16,32 @@ session (``CurrentAdministrator``) and a valid CSRF token
 Uses ``multipart/form-data`` (FastAPI ``File``/``Form`` parameters) rather
 than a JSON body, since the request carries a binary installer file
 alongside its metadata (PRS Appendix C "Upload Repository Package").
+
+Extended by REP-002 (Backlog "Repository Dashboard") with three
+additional administrator-facing endpoints:
+
+    * ``GET /api/admin/repository/packages`` - list/search packages.
+    * ``GET /api/admin/repository/packages/{package_id}`` - package
+      details.
+    * ``POST /api/admin/repository/packages/{package_id}/deactivate`` -
+      remove (deactivate) a package (FR-017).
+
+The two ``GET`` endpoints are read-only and therefore require only an
+active administrator session (no CSRF token - NFR-028 scopes CSRF to
+state-changing requests, the same reasoning already applied to
+``GET /api/admin/clients/{client_id}/updates`` in ``updates.py``). The
+``POST .../deactivate`` endpoint is state-changing and therefore requires
+both the session and a valid CSRF token, matching the upload endpoint
+below.
 """
 
 from __future__ import annotations
 
 import logging
 from typing import Any, Dict
+from uuid import UUID
 
-from fastapi import APIRouter, File, Form, UploadFile, status
+from fastapi import APIRouter, File, Form, Query, UploadFile, status
 from pydantic import ValidationError
 
 from backend.api.dependencies import (
@@ -34,8 +52,12 @@ from backend.api.dependencies import (
     SettingsDependency,
 )
 from backend.core.exceptions import AppException
-from backend.models.enums import InstallerType
-from backend.schemas.repository import RepositoryPackageResponse, RepositoryPackageUploadMetadata
+from backend.models.enums import ApprovalStatus, InstallerType
+from backend.schemas.repository import (
+    RepositoryPackageListResponse,
+    RepositoryPackageResponse,
+    RepositoryPackageUploadMetadata,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -128,5 +150,117 @@ async def upload_repository_package(
     return {
         "success": True,
         "message": "Repository package uploaded successfully.",
+        "data": response.model_dump(mode="json"),
+    }
+
+
+@router.get(
+    "/packages",
+    status_code=status.HTTP_200_OK,
+    summary="List repository packages",
+    description=(
+        "List repository packages, optionally filtered by a free-text search term (matched against "
+        "software name/version) and/or approval status (FR-006 dashboard integration / Backlog REP-002)."
+    ),
+)
+async def list_repository_packages(
+    db: DBSessionDependency,
+    repository_service: RepositoryServiceDependency,
+    _current_admin: CurrentAdministrator,
+    search: str | None = Query(
+        default=None, max_length=255, description="Case-insensitive substring match on name/version."
+    ),
+    approval_status: ApprovalStatus | None = Query(
+        default=None, description="Restrict results to Approved or Inactive packages only."
+    ),
+) -> Dict[str, Any]:
+    """
+    List repository packages for the administrator dashboard (Backlog
+    REP-002 "Repository page" / "Search" deliverables).
+
+    Read-only; requires only an active administrator session (no CSRF
+    token required for GET requests, per NFR-028).
+    """
+    packages = repository_service.list_packages(db, search=search, approval_status=approval_status)
+    response = RepositoryPackageListResponse(
+        packages=[RepositoryPackageResponse.model_validate(package) for package in packages],
+        total=len(packages),
+    )
+    return {
+        "success": True,
+        "message": "Repository packages retrieved successfully.",
+        "data": response.model_dump(mode="json"),
+    }
+
+
+@router.get(
+    "/packages/{package_id}",
+    status_code=status.HTTP_200_OK,
+    summary="Get repository package details",
+    description="Retrieve the full metadata for a single repository package (Backlog REP-002).",
+)
+async def get_repository_package(
+    db: DBSessionDependency,
+    repository_service: RepositoryServiceDependency,
+    _current_admin: CurrentAdministrator,
+    package_id: UUID,
+) -> Dict[str, Any]:
+    """
+    Retrieve a single repository package's details (Backlog REP-002
+    "Package details" deliverable).
+
+    Read-only; requires only an active administrator session. Returns 404
+    if no package exists with the given id (``RepositoryPackageNotFoundError``,
+    handled by the global ``AppException`` handler).
+    """
+    package = repository_service.get_package(db, package_id)
+    response = RepositoryPackageResponse.model_validate(package)
+    return {
+        "success": True,
+        "message": "Repository package retrieved successfully.",
+        "data": response.model_dump(mode="json"),
+    }
+
+
+@router.post(
+    "/packages/{package_id}/deactivate",
+    status_code=status.HTTP_200_OK,
+    summary="Deactivate (remove) a repository package",
+    description=(
+        "Deactivate a repository package (FR-017 Repository Maintenance / Backlog REP-002 'Delete' "
+        "deliverable). Implemented as a logical status change to Inactive rather than a physical row "
+        "delete, preserving package history and existing deployment relationships."
+    ),
+)
+async def deactivate_repository_package(
+    db: DBSessionDependency,
+    repository_service: RepositoryServiceDependency,
+    current_admin: CurrentAdministrator,
+    _csrf: CSRFProtection,
+    package_id: UUID,
+) -> Dict[str, Any]:
+    """
+    Deactivate ("remove") a repository package (Backlog REP-002 "Delete"
+    deliverable).
+
+    Requires both an active administrator session and a valid CSRF token
+    (NFR-028), since this is a state-changing request - the same pattern
+    as the upload endpoint above. Returns 404 if no package exists with
+    the given id.
+    """
+    package = repository_service.deactivate_package(db, admin_id=current_admin.id, package_id=package_id)
+    response = RepositoryPackageResponse.model_validate(package)
+
+    logger.debug(
+        "Administrator %s deactivated repository package %s (%s v%s).",
+        current_admin.id,
+        package.id,
+        package.software_name,
+        package.version,
+    )
+
+    return {
+        "success": True,
+        "message": "Repository package deactivated successfully.",
         "data": response.model_dump(mode="json"),
     }

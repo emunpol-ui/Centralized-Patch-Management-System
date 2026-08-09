@@ -17,15 +17,20 @@ INV-002 deferral note, these are added directly to this existing
 repository rather than creating a second, competing one for the same
 table.
 
-Metadata *editing* and *removal* (FR-017 Repository Maintenance) remain
-out of scope for this ticket and are not implemented here.
+Extended by REP-002 (Backlog "Repository Dashboard", FR-006 dashboard
+integration / FR-017 Repository Maintenance) with the read operations the
+dashboard requires (``list_all``, ``get_by_id``) and the status-update
+operation backing package removal (``deactivate``). Metadata *editing*
+(e.g. changing the silent install command after upload) remains out of
+scope and is not implemented here.
 """
 
 from __future__ import annotations
 
 from typing import List, Optional
+from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from backend.models.enums import ApprovalStatus, InstallerType
@@ -119,6 +124,72 @@ class RepositoryPackageRepository:
             file_size=file_size,
             approval_status=approval_status,
         )
+        db.add(package)
+        db.flush()
+        return package
+
+    def list_all(
+        self,
+        db: Session,
+        *,
+        search: Optional[str] = None,
+        approval_status: Optional[ApprovalStatus] = None,
+    ) -> List[RepositoryPackage]:
+        """
+        Return repository packages for the administrator-facing dashboard
+        (Backlog REP-002 "Repository page" / "Search" deliverables).
+
+        ``search`` performs a simple, case-insensitive substring match
+        against ``software_name`` (SQLite ``LIKE`` is case-insensitive for
+        ASCII by default), appropriate for the current proof-of-concept
+        scope - no full-text search engine is introduced. ``approval_status``
+        optionally restricts results to a single status (``APPROVED`` or
+        ``INACTIVE``); omitting it returns packages of every status so the
+        administrator can review previously removed packages as well as
+        active ones. Results are ordered by ``software_name`` for a stable,
+        predictable dashboard listing.
+        """
+        stmt = select(RepositoryPackage)
+        if approval_status is not None:
+            stmt = stmt.where(RepositoryPackage.approval_status == approval_status)
+        if search:
+            term = search.strip()
+            if term:
+                pattern = f"%{term}%"
+                stmt = stmt.where(
+                    or_(
+                        RepositoryPackage.software_name.ilike(pattern),
+                        RepositoryPackage.version.ilike(pattern),
+                    )
+                )
+        stmt = stmt.order_by(RepositoryPackage.software_name.asc(), RepositoryPackage.version.asc())
+        return list(db.execute(stmt).scalars().all())
+
+    def get_by_id(self, db: Session, package_id: UUID) -> Optional[RepositoryPackage]:
+        """
+        Return a single ``RepositoryPackage`` by primary key, or ``None``
+        if no such package exists (Backlog REP-002 "Package details" /
+        "Delete" deliverables).
+        """
+        return db.get(RepositoryPackage, package_id)
+
+    def deactivate(self, db: Session, package: RepositoryPackage) -> RepositoryPackage:
+        """
+        Set ``approval_status = INACTIVE`` on an existing package (FR-017
+        "removal" semantics - see the design note on
+        ``backend.models.repository_package.RepositoryPackage``) and flush
+        the change.
+
+        This is a logical deactivation, not a physical row delete: the
+        package row, its checksum, and its relationship to any existing
+        ``Deployment`` records are preserved. Once deactivated, the
+        package is automatically excluded from ``list_approved`` and
+        ``get_active_conflict`` (both already status-filtered to
+        ``APPROVED``), so it stops appearing as an active/deployable
+        package and no longer participates in ``VersionComparisonService``
+        matching, without any change required to either of those.
+        """
+        package.approval_status = ApprovalStatus.INACTIVE
         db.add(package)
         db.flush()
         return package

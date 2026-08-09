@@ -13,6 +13,7 @@ Repository Package").
 
 from __future__ import annotations
 
+from datetime import datetime
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -108,3 +109,23 @@ class RepositoryPackageResponse(BaseModel):
     checksum: str = Field(..., description="SHA-256 checksum of the stored installer file.")
     file_size: int = Field(..., description="Installer file size, in bytes.")
     approval_status: ApprovalStatus = Field(..., description="Approved or Inactive.")
+    created_at: datetime = Field(..., description="Upload timestamp (PRS 'upload_date').")
+    updated_at: datetime = Field(..., description="Timestamp of the most recent change to this record.")
+
+
+class RepositoryPackageListResponse(BaseModel):
+    """
+    Response body for the repository package listing endpoint (Backlog
+    REP-002 "Repository page" / "Search" deliverables).
+
+    Reuses ``RepositoryPackageResponse`` for each item so the listing and
+    detail views share an identical, single field set rather than
+    maintaining two overlapping DTOs.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    packages: list[RepositoryPackageResponse] = Field(
+        ..., description="Repository packages matching the requested filters."
+    )
+    total: int = Field(..., description="Number of packages returned.")
