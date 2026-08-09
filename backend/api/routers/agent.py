@@ -54,6 +54,37 @@ router-wide API-key authentication), it is added here as
 Layer Pattern; this handler stays thin, consistent with every other route
 on this router.
 --------------------------------------------------------------------------
+
+--------------------------------------------------------------------------
+DEPLOY-002 ADDITION - ``GET /deployments/poll``
+
+Implements FR-009 Deployment Job Retrieval (Client Polling). PRS Appendix
+B documents this endpoint's path as ``/api/deployments/poll``; consistent
+with the path convention this router already established for
+``/api/agent/heartbeat`` (CLIENT-002) and ``/api/agent/inventory/upload``
+(INV-001) - centralizing every authenticated, already-registered-client
+endpoint under this router's ``/api/agent`` prefix so it automatically
+inherits router-wide API-key authentication - it is added here as
+``/api/agent/deployments/poll`` rather than as a literal, separate
+``/api/deployments/poll`` route.
+
+The authenticated ``current_client`` (never a client id read from the
+request) is the sole source of the polling identity, per this ticket's
+"Client Isolation" requirement - see ``backend.services.deployment_service
+.DeploymentService.poll_pending_deployment`` and
+``backend.repositories.deployment_repository.DeploymentRepository.
+get_pending_target_for_client`` for where that scoping is actually
+enforced. Business logic (including the documented decision not to
+transition ``DeploymentTarget.status`` on poll) lives entirely in
+``DeploymentService``; this handler only authenticates, delegates, and
+shapes the response, consistent with every other route on this router.
+
+Reuses the existing ``Deployment``/``DeploymentTarget`` models,
+``DeploymentRepository``, and ``DeploymentService`` introduced by
+DEPLOY-001 - no new models or a second deployment repository/service were
+created. Installer download, checksum verification, silent installation,
+and status reporting remain out of scope (DEPLOY-003/DEPLOY-004).
+--------------------------------------------------------------------------
 """
 
 from __future__ import annotations
@@ -66,9 +97,15 @@ from fastapi import APIRouter, Depends, status
 from backend.api.dependencies import (
     CurrentClient,
     DBSessionDependency,
+    DeploymentServiceDependency,
     HeartbeatServiceDependency,
     InventoryServiceDependency,
     require_client_api_key,
+)
+from backend.schemas.deployment import (
+    DeploymentPollPackageDetail,
+    DeploymentPollResponse,
+    DeploymentPollTargetResponse,
 )
 from backend.schemas.heartbeat import HeartbeatRequest
 from backend.schemas.inventory import InventoryUploadRequest
@@ -184,4 +221,65 @@ async def upload_inventory(
             "updated": result.updated,
             "removed": result.removed,
         },
+    }
+
+
+@router.get(
+    "/deployments/poll",
+    status_code=status.HTTP_200_OK,
+    summary="Poll for a pending deployment",
+    description=(
+        "Retrieve the authenticated Client Agent's own pending deployment job, if any (FR-009). "
+        "Scoped strictly to the authenticated client - a client can never retrieve another client's "
+        "deployment. Read-only: does not download the installer, verify its checksum, execute it, or "
+        "change the deployment's status (see DEPLOY-003/DEPLOY-004 for those steps)."
+    ),
+)
+async def poll_deployment(
+    current_client: CurrentClient,
+    db: DBSessionDependency,
+    deployment_service: DeploymentServiceDependency,
+) -> Dict[str, Any]:
+    """
+    Return the authenticated Client Agent's own pending deployment target,
+    if one exists (FR-009 Deployment Job Retrieval).
+
+    ``current_client`` - resolved and authenticated by
+    ``require_client_api_key`` before this handler body runs - is the
+    *only* source of the polling identity passed to
+    ``DeploymentService.poll_pending_deployment``. No client id is ever
+    accepted from request input for this purpose, which is what
+    guarantees the "a client must never be able to retrieve another
+    client's deployment" requirement holds.
+
+    Returns ``has_deployment: false`` (still ``200 OK``) rather than a
+    ``404`` when nothing is pending - "no work to do right now" is a
+    routine, expected polling outcome for a Client Agent (FR-009
+    Alternative Flow), not an error.
+    """
+    target = deployment_service.poll_pending_deployment(db, client=current_client)
+
+    if target is None:
+        response = DeploymentPollResponse(has_deployment=False, deployment=None)
+        return {
+            "success": True,
+            "message": "No pending deployment.",
+            "data": response.model_dump(mode="json"),
+        }
+
+    package = target.deployment.repository_package
+    response = DeploymentPollResponse(
+        has_deployment=True,
+        deployment=DeploymentPollTargetResponse(
+            target_id=target.id,
+            deployment_id=target.deployment_id,
+            status=target.status,
+            created_at=target.created_at,
+            package=DeploymentPollPackageDetail.model_validate(package),
+        ),
+    )
+    return {
+        "success": True,
+        "message": "Pending deployment found.",
+        "data": response.model_dump(mode="json"),
     }

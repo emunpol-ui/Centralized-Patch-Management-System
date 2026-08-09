@@ -27,9 +27,22 @@ targeting), per the Service Layer Pattern (SAD Section 5.5, Section 10.10
        committing, discarding any flushed-but-uncommitted rows).
 
 Deployment *execution* (installer download, silent installation, status
-reporting, polling) belongs to DEPLOY-002/DEPLOY-003/DEPLOY-004 and is
-explicitly out of scope here - this service only creates the batch and
-its targets in the initial ``Pending`` state.
+reporting) belongs to DEPLOY-003/DEPLOY-004 and remains out of scope here.
+
+--------------------------------------------------------------------------
+DEPLOY-002 ADDITION - ``poll_pending_deployment``
+
+Implements FR-009 Deployment Job Retrieval (Client Polling): given the
+*authenticated* client identity, resolve that client's own oldest
+``Pending`` deployment target, if any. Strictly read-only - no
+``DeploymentTarget`` row is created, modified, or transitioned by this
+method (see the method's own docstring for why no status transition
+happens on poll). Composed alongside ``create_deployment`` in this same
+service, per SAD Section 10.10 ("Deployment Service... coordinates
+deployment operations") and this project's "one service per business
+domain" principle (SAD Section 10.14) - polling is part of the same
+Deployment business domain as creation, not a separate one.
+--------------------------------------------------------------------------
 """
 
 from __future__ import annotations
@@ -44,6 +57,7 @@ from sqlalchemy.orm import Session
 from backend.core.exceptions import AppException
 from backend.models.client import Client
 from backend.models.deployment import Deployment
+from backend.models.deployment_target import DeploymentTarget
 from backend.models.enums import ApprovalStatus, AuditSeverity, DeploymentStatus
 from backend.repositories.audit_log_repository import AuditLogRepository
 from backend.repositories.client_repository import ClientRepository
@@ -269,6 +283,63 @@ class DeploymentService:
             len(validated.clients),
         )
         return deployment
+
+    def poll_pending_deployment(self, db: Session, *, client: Client) -> DeploymentTarget | None:
+        """
+        Resolve ``client``'s own oldest ``Pending`` deployment target, if
+        any (FR-009 Deployment Job Retrieval).
+
+        ``client`` MUST be the ``Client`` already authenticated by
+        ``require_client_api_key`` (AUTH-002) - see
+        ``backend/api/routers/agent.py``'s ``poll_deployment`` handler,
+        which passes ``current_client`` (never a client id read from
+        request input). The lookup is delegated to
+        ``DeploymentRepository.get_pending_target_for_client``, which
+        filters strictly on ``client.id`` at the database layer - this is
+        what guarantees a client can never retrieve another client's
+        deployment (this ticket's "Client Isolation" requirement), since
+        there is no code path here that accepts an arbitrary client id.
+
+        --------------------------------------------------------------------
+        DESIGN NOTE - no status transition on poll, no audit log entry
+
+        FR-009's own functional behavior (steps 1-6) describes searching
+        for and returning a pending deployment; it does not describe a
+        status change. FR-012's Deployment Status Values table ties the
+        ``Pending`` -> ``Downloading`` transition to the Client Agent
+        *beginning the installer download* (FR-010) and *reporting* that
+        transition (FR-012 step 1, "Upon beginning the installer download
+        (FR-010), the Client Agent reports a Downloading status update") -
+        both of which are DEPLOY-003/DEPLOY-004 scope, explicitly excluded
+        from this ticket ("DEPLOY-002 IS POLLING ONLY... DO NOT
+        IMPLEMENT... Installation status reporting"). Mutating
+        ``DeploymentTarget.status`` here would therefore be performing
+        DEPLOY-004's work prematurely and would let a client claim a
+        target without ever actually downloading it. This method is
+        consequently a pure read: no ``db.add``/``db.flush``/``db.commit``
+        occurs, and the caller's request-scoped session is simply closed
+        (uncommitted, and unmodified) once the response is returned.
+
+        For the same reason, and mirroring
+        ``HeartbeatService.record_heartbeat``'s documented rationale
+        (routine, frequent, non-security-relevant traffic), a poll is not
+        written to the audit log - only this module's application logger
+        records it, consistent with FR-009's own "polling activity *may*
+        be recorded" (not "shall be recorded in the audit log", unlike the
+        FR-016 audit-logged-events list, which does not mention polling).
+        --------------------------------------------------------------------
+        """
+        target = self._deployments.get_pending_target_for_client(db, client.id)
+        if target is None:
+            logger.debug("Client %s polled for a deployment; none pending.", client.id)
+        else:
+            logger.info(
+                "Client %s polled for a deployment; returning target %s (deployment=%s).",
+                client.id,
+                target.id,
+                target.deployment_id,
+            )
+        return target
 
 
 __all__ = [

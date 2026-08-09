@@ -143,3 +143,44 @@ class DeploymentRepository:
     def get_by_id(self, db: Session, deployment_id: uuid.UUID) -> Optional[Deployment]:
         """Return the ``Deployment`` with the given primary key, or ``None``."""
         return db.get(Deployment, deployment_id)
+
+    def get_pending_target_for_client(
+        self, db: Session, client_id: uuid.UUID
+    ) -> Optional[DeploymentTarget]:
+        """
+        Return ``client_id``'s oldest ``Pending`` ``DeploymentTarget``, or
+        ``None`` if it has none.
+
+        Introduced by DEPLOY-002 (FR-009 Deployment Job Retrieval / Client
+        Polling). The query is strictly scoped to ``client_id`` - the
+        caller (``DeploymentService.poll_pending_deployment``) MUST always
+        pass the identity resolved from the authenticated API key
+        (``CurrentClient.id``), never a client id taken from request
+        input, so that a client can never retrieve another client's
+        deployment (this ticket's "Client Isolation" requirement).
+
+        Only ``Pending`` targets are matched - not the full
+        ``ACTIVE_DEPLOYMENT_STATUSES`` set used by
+        ``get_active_target_for_client``/``get_active_targets_for_clients``
+        for the DEPLOY-001 "one active deployment per client" check.
+        ``Downloading`` and ``Installing`` represent a deployment the
+        client has already claimed and moved past the "not yet retrieved"
+        state FR-009 describes; polling again while in one of those states
+        is not this ticket's concern (see FR-012/FR-010, DEPLOY-003 and
+        DEPLOY-004 scope).
+
+        Business Rule 9 (PRS Section 2.7, enforced by
+        ``DeploymentService.create_deployment`` since DEPLOY-001) already
+        guarantees a client has at most one non-terminal target at a time,
+        so ``.limit(1)`` here is a defensive safeguard rather than a
+        behavior-changing choice; ``created_at`` ascending simply makes
+        the result deterministic if that invariant were ever violated.
+        """
+        stmt = (
+            select(DeploymentTarget)
+            .where(DeploymentTarget.client_id == client_id)
+            .where(DeploymentTarget.status == DeploymentStatus.PENDING)
+            .order_by(DeploymentTarget.created_at.asc())
+            .limit(1)
+        )
+        return db.execute(stmt).scalars().first()
