@@ -1,6 +1,6 @@
 # CURRENT_STATE.md
 
-**Version:** 1.1  
+**Version:** 1.2  
 **Last Updated:** August 9, 2026
 
 ---
@@ -23,7 +23,7 @@ A proof-of-concept centralized software patch management system for Windows comp
 | Frontend | Bootstrap 5 (Jinja2 Templates not yet wired) |
 |Client Agent | Inventory collection scaffolding implemented (server-side inventory upload complete)|
 | Authentication | Admin: Session + CSRF cookie; Client: Bearer API Key (SHA-256) |
-| Deployment | Local Package Repository (upload + administrator dashboard listing/search/details/deactivation implemented — REP-001, REP-002); deployment **creation** implemented (DEPLOY-001 — batch + per-client target persistence, initial `Pending` status); deployment execution (download/install/report/poll) not yet implemented |
+| Deployment | Local Package Repository (upload + administrator dashboard listing/search/details/deactivation implemented — REP-001, REP-002); deployment **creation** implemented (DEPLOY-001 — batch + per-client target persistence, initial `Pending` status); deployment **polling** implemented (DEPLOY-002 — client-scoped `GET /api/agent/deployments/poll`, read-only, no status transition); installer download/execution/status reporting not yet implemented |
 | File Handling | `python-multipart` (installer upload parsing), SHA-256 (`hashlib`, standard library) |
 
 ### Architecture
@@ -55,11 +55,12 @@ backend/
 │   ├── routers/
 │   │   ├── health.py
 │   │   ├── auth.py                # Admin login/logout/me/keys
-│   │   ├── agent.py               # Protected agent endpoints (ping, heartbeat, inventory upload)
+│   │   ├── agent.py               # Protected agent endpoints (ping, heartbeat, inventory upload,
+│   │   │                          # deployment poll — DEPLOY-002: GET /api/agent/deployments/poll)
 │   │   ├── registration.py        # POST /api/register (CLIENT-001)
 │   │   ├── updates.py             # Admin version-comparison endpoint (INV-002)
 │   │   ├── repository.py          # Admin installer upload (REP-001) + list/detail/deactivate (REP-002)
-│   │   └── deployments.py         # Admin deployment creation endpoint (DEPLOY-001)
+│   │   └── deployments.py         # Admin deployment creation endpoint (DEPLOY-001, unmodified by DEPLOY-002)
 │   └── dependencies.py            # DI providers (admin + client + services); extended (DEPLOY-001): DeploymentServiceDependency
 ├── core/
 │   ├── config.py                  # Extended (REP-001): MAX_INSTALLER_UPLOAD_SIZE_MB
@@ -93,6 +94,7 @@ backend/
 │   ├── repository_package_repository.py   # Extended (REP-001): create, get_active_conflict
 │   │                                       # Extended (REP-002): list_all, get_by_id, deactivate
 │   └── deployment_repository.py           # NEW (DEPLOY-001): Deployment/DeploymentTarget data access
+│                                           # Extended (DEPLOY-002): get_pending_target_for_client (client-scoped poll query)
 ├── services/
 │   ├── auth_service.py
 │   ├── client_auth_service.py
@@ -102,6 +104,7 @@ backend/
 │   ├── version_comparison_service.py      # FR-007 version comparison business logic (INV-002)
 │   ├── repository_service.py              # FR-006 installer upload (REP-001) + list/get/deactivate (REP-002)
 │   └── deployment_service.py              # NEW (DEPLOY-001): FR-008/FR-009 deployment creation business logic
+│                                           # Extended (DEPLOY-002): poll_pending_deployment (read-only, FR-009 polling)
 ├── utils/
 │   ├── version_compare.py                 # FR-007 name/version matching + comparison rules (INV-002)
 │   └── file_storage.py                    # FR-006 extension validation, SHA-256 hashing, file streaming (REP-001)
@@ -113,6 +116,8 @@ backend/
     ├── repository.py                      # Upload metadata + response schemas (REP-001); list response,
     │                                       # created_at/updated_at fields (REP-002)
     └── deployment.py                      # NEW (DEPLOY-001): deployment creation request/response schemas
+                                            # Extended (DEPLOY-002): DeploymentPollResponse/DeploymentPollTargetResponse/
+                                            # DeploymentPollPackageDetail (agent polling response DTOs)
 
 agent/                                     # Client Agent (initial implementation)
 ├── communication/                         # Server communication helpers
@@ -135,9 +140,9 @@ tests/                                     # Empty skeleton (no pytest configure
 
 | Metric                    | Status                                          |
 | ------------------------- | ------------------------------------------------ |
-| **Current Version**       | v1.1                                            |
-| **Development Stage**     | DEPLOY-002 — Agent Polling (not yet started)    |
-| **Latest Stable Release** | DEPLOY-001 — Deployment Creation                |
+| **Current Version**       | v1.2                                            |
+| **Development Stage**     | DEPLOY-003 — Installer Download & Execution (not yet started) |
+| **Latest Stable Release** | DEPLOY-002 — Agent Polling                      |
 | **Repository Status**     | Active Development                              |
 | **Architecture Status**   | Stable                                          |
 | **Regression Status**     | No known regressions from completed tickets     |
@@ -157,16 +162,17 @@ tests/                                     # Empty skeleton (no pytest configure
 | v0.9    | REP-001 — Repository Management                       |
 | v1.0    | REP-002 — Repository Dashboard                        |
 | v1.1    | DEPLOY-001 — Deployment Creation                      |
+| v1.2    | DEPLOY-002 — Agent Polling                            |
 
 ### Current Ticket
 
-**DEPLOY-001 — Deployment Creation** ✅ Complete
+**DEPLOY-002 — Agent Polling** ✅ Complete
 
 ### Next Ticket
 
-**DEPLOY-002 — Agent Polling**
+**DEPLOY-003 — Installer Download & Execution**
 
-**Purpose:** Allow a Client Agent to poll the server for pending deployment jobs assigned to its Client ID (FR-009 Deployment Job Retrieval), building on the now-complete deployment batch/target persistence (DEPLOY-001).
+**Purpose:** Allow a Client Agent that has retrieved a pending deployment (DEPLOY-002) to download the associated installer, verify its SHA-256 checksum against the value returned by the poll endpoint, and execute it silently (FR-010 Installer Download, FR-011 Silent Software Installation), building on the now-complete client-scoped polling endpoint (DEPLOY-002).
 
 ---
 
@@ -591,7 +597,57 @@ Database Persistence
 - ✅ `pyflakes` reports no warnings across all new/modified files
 - ✅ No regressions detected in CORE-001, CORE-002, AUTH-001, AUTH-002, CLIENT-001, CLIENT-002, INV-001, INV-002, REP-001, or REP-002 — `RepositoryService`, `RepositoryPackageRepository`, `VersionComparisonService`, `ClientRepository`, and every existing endpoint were not behaviorally modified beyond the additive `DeploymentServiceDependency` in `backend/api/dependencies.py` and the additive router registration in `backend/main.py`
 
-**Important Note:** No database schema or migration changes were required — `Deployment` and `DeploymentTarget` (defined by CORE-002) already had every column this ticket needed (including the `uq_deployment_target_deployment_client` unique constraint and `ix_deployment_targets_client_status` index). Deployment *execution* — agent polling (DEPLOY-002), installer download/checksum verification (DEPLOY-003), silent installation and status reporting (DEPLOY-003/DEPLOY-004), and deployment cancellation (a later ticket per the Backlog) — remains entirely unimplemented; every newly created `DeploymentTarget` will remain `Pending` indefinitely until a future ticket implements client-side retrieval and execution.
+**Important Note:** No database schema or migration changes were required — `Deployment` and `DeploymentTarget` (defined by CORE-002) already had every column this ticket needed (including the `uq_deployment_target_deployment_client` unique constraint and `ix_deployment_targets_client_status` index). Deployment *execution* — installer download/checksum verification (DEPLOY-003), silent installation and status reporting (DEPLOY-003/DEPLOY-004), and deployment cancellation (a later ticket per the Backlog) — remains unimplemented as of this ticket; agent polling was subsequently implemented by DEPLOY-002 (below).
+
+---
+
+### DEPLOY-002 — Agent Polling
+
+| Status | ✅ Production Ready |
+
+**Objective:** Implement Client Agent deployment polling (Backlog DEPLOY-002, FR-009 Deployment Job Retrieval / Client Polling): allow the authenticated Client Agent to periodically ask the CPMS Server whether it has a pending deployment assigned to it, scoped strictly to the authenticated client's own identity, building on the deployment batch/target persistence already implemented by DEPLOY-001.
+
+**Features Implemented:**
+
+- `DeploymentRepository` (introduced by DEPLOY-001) extended with:
+  - `get_pending_target_for_client(db, client_id)` — a strictly client-scoped, read-only query returning the requesting client's oldest `Pending` `DeploymentTarget`, or `None`. Deliberately filters on `DeploymentStatus.PENDING` only (not the broader `ACTIVE_DEPLOYMENT_STATUSES` set used by DEPLOY-001's Business-Rule-9 check), since `Downloading`/`Installing` represent a deployment the client has already claimed and moved past the "not yet retrieved" state FR-009 describes. `.limit(1)` + `created_at` ascending is a defensive safeguard — Business Rule 9 (enforced since DEPLOY-001) already guarantees at most one non-terminal target per client.
+- `DeploymentService` (introduced by DEPLOY-001) extended with:
+  - `poll_pending_deployment(db, *, client)` — accepts the *already-authenticated* `Client` object (never a client id from request input) and delegates to `DeploymentRepository.get_pending_target_for_client(db, client.id)`. Purely read-only: no `db.add`/`flush`/`commit` occurs, and `DeploymentTarget.status` is never mutated by this method (see Design Decisions below). Not audit-logged (routine, frequent traffic — only the application logger records each poll), mirroring `HeartbeatService.record_heartbeat`'s established rationale.
+- `backend/schemas/deployment.py` extended with three new response-only DTOs (no new request schema — the poll takes no input beyond the authenticated identity):
+  - `DeploymentPollPackageDetail` — the associated repository package's Client-Agent-relevant fields (`software_name`, `version`, `installer_type`, `installer_filename`, `silent_command`, `checksum`, `file_size`); deliberately omits administrator-only fields (`approval_status`, timestamps) that `RepositoryPackageResponse` exposes to the dashboard
+  - `DeploymentPollTargetResponse` — `target_id` (this client's `DeploymentTarget.id`), `deployment_id` (the batch id), `status`, `created_at`, and the nested `package`
+  - `DeploymentPollResponse` — `has_deployment: bool` + `deployment: Optional[DeploymentPollTargetResponse]`
+- New Client-Agent-facing, read-only endpoint: `GET /api/agent/deployments/poll` (Backlog DEPLOY-002 "Polling endpoint" deliverable), added directly to the existing `backend/api/routers/agent.py` router — **no new router was created**, since this router's `dependencies=[Depends(require_client_api_key)]` already protects every route declared on it (the same pattern already used for `/heartbeat` and `/inventory/upload`)
+  - Uses `CurrentClient` (resolved by the existing `require_client_api_key`/AUTH-002 dependency) as the *sole* source of polling identity — no client id is ever accepted from the request body, query string, or path
+  - Returns `200 OK` with `has_deployment: false` (not `404`) when nothing is pending — a routine, expected polling outcome, not an error
+  - Returns `200 OK` with `has_deployment: true` and the full `DeploymentPollTargetResponse` (including nested package metadata: checksum, silent command, installer filename/type, file size) when a `Pending` target exists
+  - Router handler stays thin: authenticates (via the router-wide dependency + `CurrentClient`), delegates to `DeploymentService.poll_pending_deployment`, shapes the response — no business logic in the router
+
+**No new files, no `main.py` changes, no model changes, no migration changes** — `backend/api/routers/agent.py` (existing router) was extended with one endpoint; `backend/repositories/deployment_repository.py`, `backend/services/deployment_service.py`, and `backend/schemas/deployment.py` (all introduced by DEPLOY-001) were extended, not replaced. `agent_router` was already registered in `backend/main.py` prior to this ticket, so no router-registration change was needed.
+
+**Design Decisions (Documented):**
+
+- **No status transition on poll (`Pending` stays `Pending`):** FR-009's own functional behavior (steps 1–6) describes searching for and returning a pending deployment; it does not describe a status change. FR-012's Deployment Status Values table ties the `Pending → Downloading` transition to the Client Agent *beginning the installer download* (FR-010) and *reporting* that transition (FR-012 step 1) — both explicitly DEPLOY-003/DEPLOY-004 scope, out of bounds for this ticket ("DEPLOY-002 IS POLLING ONLY... DO NOT IMPLEMENT... Installation status reporting"). Mutating `DeploymentTarget.status` on poll would perform DEPLOY-004's work prematurely and would let a client claim a target without ever downloading it. This resolves the ambiguity flagged in CURRENT_STATE v1.1's "Key Decision for DEPLOY-002 (Upcoming)" note in favor of "poll is a pure read."
+- **Client Isolation enforced at the query layer, not just the handler:** `get_pending_target_for_client` filters on `client_id` inside the SQL `WHERE` clause itself — there is no code path anywhere in the poll flow that accepts a client id from request input; the authenticated `CurrentClient.id` is the only identity ever passed down from the router to the service to the repository.
+- **`Pending`-only match, not the full active-status set:** Reusing `get_active_target_for_client`/`get_active_targets_for_clients` (DEPLOY-001, matches `Pending`/`Downloading`/`Installing`) would have let a client "re-poll" a deployment it has already moved into `Downloading`/`Installing`. A new, narrower query (`get_pending_target_for_client`, `Pending` only) was added instead, keeping the DEPLOY-001 methods and their Business-Rule-9 semantics completely unchanged.
+- **No audit log entry for a poll:** Mirrors `HeartbeatService.record_heartbeat`'s already-documented rationale — polling is routine, frequent, non-security-relevant traffic, not a rare higher-value event like registration or key issuance. FR-009 itself says polling activity "may be recorded," not "shall be recorded in the audit log" (unlike FR-016's explicit audit-logged-events list, which does not mention polling).
+- **`200 OK` with `has_deployment: false`, not `404`, when nothing is pending:** "No work to do right now" is an expected, routine outcome of polling for a Client Agent (FR-009 Alternative Flow: "the server returns a 'No Pending Deployment' response"), not an error condition — modeling it as a `404` would make ordinary polling traffic register as constant client-side/observability errors.
+- **Endpoint placed on the existing `agent.py` router, at `/api/agent/deployments/poll`:** PRS Appendix B documents the literal path `/api/deployments/poll`, but — consistent with the precedent already set by `/api/agent/heartbeat` (CLIENT-002) and `/api/agent/inventory/upload` (INV-001), both of which also deviate from their PRS-literal paths for the same reason — every authenticated, already-registered-client endpoint is centralized under `/api/agent` so it automatically inherits the router-wide `require_client_api_key` dependency, rather than requiring each new agent endpoint to remember to declare authentication individually.
+
+**Manual/Scripted Verification (via `TestClient` against a real, Alembic-migrated SQLite database):**
+
+- ✅ Poll before any deployment exists for the client: `200 OK`, `has_deployment: false`, `deployment: null`
+- ✅ Poll without an `Authorization` header: rejected `401 Unauthorized`
+- ✅ Repository package upload (REP-001, unmodified) + deployment creation (DEPLOY-001, unmodified) targeting Client A only
+- ✅ Poll as Client A after deployment creation: `200 OK`, `has_deployment: true`; response includes the correct `deployment_id` (matching the batch id returned by `POST /api/admin/deployments`), `target_id`, `status: "Pending"`, and the full nested `package` (software name, version, installer type, filename, silent command, checksum, file size) matching the uploaded package
+- ✅ **Client Isolation verified directly:** Client B polling at the same time (with no deployment of its own) receives `has_deployment: false` — confirmed Client B never receives any part of Client A's deployment
+- ✅ Repeated poll as Client A: idempotent — `target_id` and `status` (`"Pending"`) are identical across repeated calls; confirms the endpoint does not mutate `DeploymentTarget.status`
+- ✅ A second deployment created (DEPLOY-001) targeting Client B only: Client B's subsequent poll returns its own deployment (`has_deployment: true`), with a `deployment_id` different from Client A's — confirmed each client only ever sees its own batch
+- ✅ Full application import and OpenAPI schema generation confirmed `GET /api/agent/deployments/poll` registers correctly alongside all 14 other existing routes
+- ✅ `pyflakes` reports no new warnings across all new/modified files, and no new warnings across the full `backend/` tree beyond the pre-existing, already-documented unused-import nit in `auth_service.py`
+- ✅ No regressions detected in CORE-001, CORE-002, AUTH-001, AUTH-002, CLIENT-001, CLIENT-002, INV-001, INV-002, REP-001, REP-002, or DEPLOY-001 — `DeploymentService.create_deployment`, `DeploymentRepository`'s DEPLOY-001 methods, `RepositoryService`, `RepositoryPackageRepository`, `VersionComparisonService`, `ClientRepository`, and every existing endpoint (including `POST /api/admin/deployments`, exercised again in this same test run) were not behaviorally modified
+
+**Important Note:** DEPLOY-002 is polling-only, as scoped. It does not download the installer, verify its checksum on the client side, execute it, report status, or transition `DeploymentTarget.status`. Every `DeploymentTarget` a Client Agent retrieves via this endpoint remains `Pending` until a future ticket (DEPLOY-003 for download/execution, DEPLOY-004 for status reporting) implements those steps and reports the resulting transition back to the server.
 
 ---
 ## Current System State
@@ -615,6 +671,7 @@ Database Persistence
 | GET    | `/api/agent/ping`                         | Verify client authentication                              | Client API key                        |
 | POST   | `/api/agent/heartbeat`                    | Report client heartbeat                                   | Client API key                        |
 | POST   | `/api/agent/inventory/upload`             | Upload complete installed software inventory (FR-005)     | Client API key                        |
+| GET    | `/api/agent/deployments/poll`             | Poll for the authenticated client's own pending deployment (FR-009, DEPLOY-002) | Client API key   |
 
 ### Database Status
 
@@ -626,6 +683,7 @@ Database Persistence
 - **No schema changes in REP-001** — `repository_packages` already had every column this ticket needed (CORE-002); no migration was added
 - **No schema changes in REP-002** — the listing, detail, and deactivation operations use only existing `repository_packages` columns (including `created_at`/`updated_at`, already present via `AuditModel`); no migration was added
 - **No schema changes in DEPLOY-001** — `deployments` and `deployment_targets` (CORE-002) already had every column, constraint, and index this ticket needed (`uq_deployment_target_deployment_client`, `ix_deployment_targets_client_status`); no migration was added. `deployments`/`deployment_targets` now contain real rows for the first time since CORE-002 defined them.
+- **No schema changes in DEPLOY-002** — polling is a pure read against the existing `deployment_targets`/`deployments`/`repository_packages` tables via a new repository query method only; no new column, table, constraint, or migration was needed. Polling does not write to the database at all (no `INSERT`/`UPDATE` of any kind).
 
 ### Authentication Status
 
@@ -645,6 +703,7 @@ Database Persistence
 - Router-level protection for all `/api/agent/*` routes
 - Registration endpoint uses its own credential resolution (existing `Client` OR unclaimed `ClientProvisioningKey`)
 - Authenticated inventory uploads use the existing API key authentication without additional authorization requirements
+- `GET /api/agent/deployments/poll` (DEPLOY-002) uses the same router-level `require_client_api_key` protection as every other `/api/agent/*` route; the authenticated `CurrentClient.id` is the only identity used to scope the deployment query — no client id is ever accepted from request input
 
 ### Repository Workflow (New — REP-001)
 
@@ -739,29 +798,44 @@ Database Persistence
    └── All of the above committed atomically — a rejected request
        never leaves a partial Deployment/DeploymentTarget behind
 
-3. (Future — DEPLOY-002/DEPLOY-003/DEPLOY-004) Client Agent polls for
-   its Pending deployment target, downloads the installer, executes it
-   silently, and reports the result back to the server — not yet
-   implemented; every DeploymentTarget created above remains Pending
-   indefinitely until those tickets are completed
+3. Client Agent polls for its Pending deployment target (New — DEPLOY-002)
+   → GET /api/agent/deployments/poll
+   ├── Scoped strictly to the authenticated client (Authorization:
+   │   Bearer <api_key> → CurrentClient.id) — never a client id from
+   │   request input
+   ├── Returns has_deployment: true + target_id, deployment_id (batch
+   │   id), status ("Pending"), and the full package details (software
+   │   name, version, installer type/filename, silent command,
+   │   checksum, file_size) if a Pending target exists for this client
+   ├── Returns has_deployment: false (still 200 OK) if none exists
+   └── Read-only: does NOT transition DeploymentTarget.status,
+       download the installer, or write an audit log entry
+
+4. (Future — DEPLOY-003/DEPLOY-004) Client Agent downloads the
+   installer, verifies its checksum, executes it silently, and
+   reports the result (Downloading/Installing/Completed/Failed) back
+   to the server — not yet implemented; every DeploymentTarget
+   retrieved via step 3 above remains Pending indefinitely until those
+   tickets are completed
 ```
 
-## Deployment Workflow (Partially Implemented — Creation Only)
+## Deployment Workflow (Creation + Polling Implemented)
 
 - Local Package Repository: **upload implemented (REP-001)**, **administrator listing/search/details/deactivation implemented (REP-002)**
 - Deployment Creation: **implemented (DEPLOY-001)** — `POST /api/admin/deployments` creates a batch + one Pending target per targeted client; validated against package approval status, client existence, and Business Rule 9 (one active deployment per client)
-- Deployment *execution* — agent polling (DEPLOY-002), installer download/execution (DEPLOY-003), status reporting (DEPLOY-004), deployment cancellation, and a deployment-history dashboard remain **not yet implemented**
-- Silent Installers: not yet executed by a deployment (silent command is validated and stored at upload time; execution belongs to DEPLOY-003 client-side work, already partially anticipated by the existing FR-011 direct-process-execution design)
-- SHA-256 Package Validation: **upload-time computation now implemented** (REP-001, `RepositoryPackage.checksum`); download-time re-verification by the Client Agent (FR-010/FR-011) remains part of future DEPLOY-* tickets
+- Deployment Polling: **implemented (DEPLOY-002)** — `GET /api/agent/deployments/poll` returns the authenticated client's own Pending deployment target (if any), scoped strictly to that client, with no status transition and no audit log entry
+- Deployment *execution* — installer download/execution (DEPLOY-003), status reporting (DEPLOY-004), deployment cancellation, and a deployment-history dashboard remain **not yet implemented**
+- Silent Installers: not yet executed by a deployment (silent command is validated and stored at upload time, and is now returned to the polling client via DEPLOY-002; execution belongs to DEPLOY-003 client-side work, already partially anticipated by the existing FR-011 direct-process-execution design)
+- SHA-256 Package Validation: **upload-time computation now implemented** (REP-001, `RepositoryPackage.checksum`); the checksum is now also **returned to the polling Client Agent** (DEPLOY-002, `DeploymentPollPackageDetail.checksum`); download-time re-verification by the Client Agent (FR-010/FR-011) remains part of DEPLOY-003
 
 ### Existing Infrastructure
 
-- **No automated test framework** configured (`pytest` not in `requirements.txt`; `tests/` directory remains an empty skeleton). All verification is currently performed through manual API testing, PowerShell scripts, direct SQLite inspection, and (for INV-002/REP-001/DEPLOY-001) ad hoc scripted verification using FastAPI's `TestClient`.
+- **No automated test framework** configured (`pytest` not in `requirements.txt`; `tests/` directory remains an empty skeleton). All verification is currently performed through manual API testing, PowerShell scripts, direct SQLite inspection, and (for INV-002/REP-001/DEPLOY-001/DEPLOY-002) ad hoc scripted verification using FastAPI's `TestClient`.
 - **No scheduler/background tasks** — client `OFFLINE` status is currently computed at read time rather than maintained by a background service. Version comparison (INV-002) follows this same "computed at read time" pattern.
 - **Repository package listing/detail/deactivation implemented (REP-002)** — `GET /api/admin/repository/packages` (list/search), `GET /api/admin/repository/packages/{package_id}` (details), and `POST /api/admin/repository/packages/{package_id}/deactivate` (remove) are all available. Metadata *editing* (e.g. changing the silent install command after upload) remains unimplemented.
 - **No administrator-facing inventory or client listing endpoints** — client registration and software inventory data are stored successfully and can be compared against the repository (INV-002) and now populated via real uploads (REP-001) and browsed via the repository dashboard endpoints (REP-002), but there is still no general "list clients" or "list inventory" endpoint. These capabilities remain planned for a future dashboard-facing ticket.
-- **Deployment creation implemented (DEPLOY-001)** — `POST /api/admin/deployments` creates a batch + one Pending target per targeted client. There is still no administrator-facing "list deployments"/"deployment history" endpoint (DASH-002/a future ticket) and no client-facing polling endpoint yet (DEPLOY-002), so a created deployment currently has no way to progress beyond `Pending` or be observed again after creation except via direct database inspection.
-- **Client Agent scaffolding implemented** — communication layer, inventory scanner, and application entry point exist; automated Windows Registry inventory collection will be exercised through the deployed Windows Agent in future milestones.
+- **Deployment creation and polling implemented (DEPLOY-001, DEPLOY-002)** — `POST /api/admin/deployments` creates a batch + one Pending target per targeted client, and `GET /api/agent/deployments/poll` lets the targeted Client Agent retrieve its own Pending target. There is still no administrator-facing "list deployments"/"deployment history" endpoint (DASH-002/a future ticket) and no installer download/execution/status-reporting endpoint yet (DEPLOY-003/DEPLOY-004), so a created deployment currently has no way to progress beyond `Pending` (it can now be *retrieved* by its client via polling, but not yet acted upon) or be observed again by the administrator after creation except via direct database inspection.
+- **Client Agent scaffolding implemented** — communication layer, inventory scanner, and application entry point exist; automated Windows Registry inventory collection and DEPLOY-002 polling consumption will be exercised through the deployed Windows Agent in future milestones.
 - **No frontend UI** (Jinja2 templates not yet wired; HTMX optional and not yet implemented).
 - **No CORS configuration for credentialed cross-origin clients** — `CORS_ORIGINS` currently defaults to `"*"` with `allow_credentials=True`, which browsers reject. This is acceptable for the current same-origin prototype but will require explicit origin configuration before introducing a separate frontend.
 
@@ -884,12 +958,22 @@ Database Persistence
 | **Regression**   | Passed (`TestClient`-based end-to-end verification of successful creation, unauthenticated/missing-CSRF rejection, duplicate-client/empty-list schema rejection, nonexistent/inactive-package rejection, nonexistent-client rejection, active-deployment-conflict rejection; atomicity and audit-log-count verified by direct database inspection after exercising every rejection path; `pyflakes` clean; `RepositoryService`, `RepositoryPackageRepository`, `VersionComparisonService`, and `ClientRepository` were not behaviorally modified) |
 
 ---
+
+### DEPLOY-002 — Agent Polling
+
+| Status           | ✅ Production Ready                                                                                                                                         |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Purpose**      | Allow the authenticated Client Agent to periodically retrieve its own pending deployment job, scoped strictly to its identity (FR-009 Deployment Job Retrieval / Client Polling) |
+| **Deliverables** | `DeploymentRepository.get_pending_target_for_client` (extended), `DeploymentService.poll_pending_deployment` (extended), `backend/schemas/deployment.py` (`DeploymentPollPackageDetail`/`DeploymentPollTargetResponse`/`DeploymentPollResponse`, extended), `GET /api/agent/deployments/poll` on the existing `backend/api/routers/agent.py` |
+| **Design Decisions** | No status transition on poll — `Pending → Downloading` is tied by FR-012 to the client *reporting* the start of the download (FR-010), which is DEPLOY-003/DEPLOY-004 scope, not this ticket's; client isolation enforced at the query layer (`WHERE client_id = :authenticated_client_id`), never via a request-supplied id; matches `Pending` only (not the broader active-status set used by DEPLOY-001's Business-Rule-9 check); no audit log entry for a poll (routine traffic, mirrors `HeartbeatService`); `200 OK` + `has_deployment: false` (not `404`) when nothing is pending; endpoint added to the existing `agent.py` router (no new router, no new `main.py` registration needed) |
+| **Regression**   | Passed (`TestClient`-based end-to-end verification of no-pending-deployment response, unauthenticated rejection, pending-deployment retrieval with full package details, client-isolation between two distinct clients, idempotent repeated polling with no status mutation, and a second client's independent deployment; `pyflakes` clean; `DeploymentService.create_deployment`, `DeploymentRepository`'s DEPLOY-001 methods, and every existing endpoint — including `POST /api/admin/deployments`, re-exercised in the same test run — were not behaviorally modified) |
+
+---
 ## Pending Backlog
 
 | Ticket | Purpose | Dependencies | Priority |
 |--------|---------|--------------|----------|
-| **DEPLOY-002** | Agent Polling — clients poll for deployments | DEPLOY-001 (Deployment Creation) | Next |
-| **DEPLOY-003** | Installer Download & Execution — client-side | DEPLOY-002 | - |
+| **DEPLOY-003** | Installer Download & Execution — client-side | DEPLOY-002 (Agent Polling) ✅ | Next |
 | **DEPLOY-004** | Deployment Status Reporting — client reports completion | DEPLOY-003 | - |
 | **DASH-001** | Dashboard Home | AUTH-001, INV-001, REP-001 | - |
 | **DASH-002** | Deployment Monitoring | DEPLOY-004 | - |
@@ -979,6 +1063,13 @@ Database Persistence
 - No explicit `db.rollback()` call was added anywhere: because every service method in this codebase (including this one) defers `db.commit()` until the very end of a successful operation, and `get_db()`'s `finally` block only ever calls `db.close()` (never `commit()`), an exception raised mid-method simply results in the session being closed without committing — any `flush()`-ed-but-uncommitted rows are discarded automatically. This is the same implicit pattern already relied upon by every other service.
 - `ACTIVE_DEPLOYMENT_STATUSES` (`Pending`, `Downloading`, `Installing`) is defined once, at module scope in `deployment_repository.py`, rather than being duplicated as a literal tuple inside `DeploymentService` — future DEPLOY-* tickets needing the same "is this target still active" concept should import this constant rather than re-deriving it
 
+### Deployment Polling Strategy (DEPLOY-002)
+- `get_pending_target_for_client` is a **new, narrower** repository query, deliberately separate from DEPLOY-001's `get_active_target_for_client`/`get_active_targets_for_clients` (which match the broader `ACTIVE_DEPLOYMENT_STATUSES` set and exist solely to enforce Business Rule 9 at creation time). Polling only ever needs to surface `Pending` work; reusing the broader query would have let a client "re-poll" a target it had already moved into `Downloading`/`Installing`. The two DEPLOY-001 methods were left completely untouched.
+- Client isolation is enforced **inside the SQL `WHERE` clause** (`DeploymentTarget.client_id == client_id`), not by filtering an already-fetched list in Python and not by trusting anything from the request body/path — `poll_pending_deployment(db, *, client: Client)` only ever receives the already-authenticated `Client` object from `require_client_api_key`/`CurrentClient` (AUTH-002), so there is no code path capable of accepting an arbitrary client id for this purpose.
+- **Poll is a pure read, by design, not by omission:** no `db.add`/`db.flush`/`db.commit` call exists anywhere in `poll_pending_deployment` or `get_pending_target_for_client`. This was the resolution to the ambiguity CURRENT_STATE v1.1 flagged in its "Key Decision for DEPLOY-002 (Upcoming)" note (whether `Pending → Downloading` should transition on poll vs. on download-start): FR-009's functional behavior does not describe a status change, and FR-012 ties that transition to the client *reporting* the start of a download (FR-010) — a DEPLOY-003/DEPLOY-004-owned event this ticket must not anticipate.
+- Response shaping follows the same `model_config = ConfigDict(from_attributes=True)` + `.model_validate(...)` convention already used by `DeploymentTargetResponse`/`DeploymentResponse` (DEPLOY-001) and `RepositoryPackageResponse` (REP-001/002) — `DeploymentPollPackageDetail.model_validate(target.deployment.repository_package)` builds directly from the ORM relationship chain rather than manually copying fields.
+- The endpoint was added to the **existing** `backend/api/routers/agent.py` router rather than a new router, reusing that router's `dependencies=[Depends(require_client_api_key)]` router-wide protection — the same centralization pattern CLIENT-002 (`/heartbeat`) and INV-001 (`/inventory/upload`) already established, so `main.py` required no changes (`agent_router` was already registered).
+
 ### Future Migration Considerations
 - SQLAlchemy dialect-portable `Uuid` type used for all primary/foreign keys (deliberate deviation from PRS's illustrative auto-increment integers — documented in `backend/models/base.py`)
 - `Secure` cookie flag configurable — must be set `True` once HTTPS is deployed
@@ -1002,8 +1093,9 @@ Database Persistence
 | **No scheduler for OFFLINE detection** | Design choice | Offline status computed at read time; background jobs not yet introduced |
 | **`updated_at` serves as registration timestamp** | Implicit | No separate `last_registration` field; registration updates touch `updated_at` |
 | **No client-side download-time checksum re-verification yet** | Tracked | REP-001 computes and stores the checksum at upload time (FR-006); the Client Agent's download-time re-verification (FR-010/FR-011) is DEPLOY-003 scope, not yet implemented |
-| **Deployment targets have no way to progress past `Pending`** | Tracked | DEPLOY-001 only creates batches/targets; agent polling (DEPLOY-002), installer download/execution (DEPLOY-003), and status reporting (DEPLOY-004) remain unimplemented, so every created `DeploymentTarget` stays `Pending` indefinitely until those tickets land |
-| **No deployment cancellation or history endpoint yet** | Tracked | A created deployment can currently only be observed via direct database inspection; a future ticket (DASH-002 or a dedicated DEPLOY-* ticket) is expected to add listing/cancellation |
+| **Deployment targets have no way to progress past `Pending`** | Tracked | DEPLOY-002 lets a Client Agent *retrieve* its own `Pending` target (by design, without transitioning its status); installer download/execution (DEPLOY-003) and status reporting (DEPLOY-004) remain unimplemented, so every `DeploymentTarget` still stays `Pending` indefinitely until those tickets land |
+| **No deployment cancellation or history endpoint yet** | Tracked | A created deployment can currently only be observed by an administrator via direct database inspection (though the *targeted client* can now observe its own via polling — DEPLOY-002); a future ticket (DASH-002 or a dedicated DEPLOY-* ticket) is expected to add admin-facing listing/cancellation |
+| **No client-side consumption of the polling endpoint yet** | Tracked | `GET /api/agent/deployments/poll` (DEPLOY-002) is server-side complete and verified via `TestClient`; the `agent/` package's `deployment`/`installer` modules that will actually call it from a real Windows Client Agent do not exist yet (DEPLOY-003 scope, per the SAD §7.5 directory layout) |
 
 ---
 
@@ -1079,9 +1171,12 @@ Database Persistence
 ### Important Files Likely to Be Modified
 | Module | Purpose |
 |--------|---------|
-| `backend/api/routers/agent.py` | Add new agent-facing endpoints (protected by `require_client_api_key`) |
-| `backend/api/routers/deployments.py` | DEPLOY-002 will add the client-facing polling endpoint here or on a new agent-facing router — not yet decided; DEPLOY-001's `POST /api/admin/deployments` must not be modified except for genuine integration needs |
-| `backend/repositories/deployment_repository.py` | DEPLOY-002/003/004 will extend this further with polling/status-update queries |
+| `backend/api/routers/agent.py` | Add new agent-facing endpoints (protected by `require_client_api_key`); DEPLOY-002 added `GET /deployments/poll` here |
+| `backend/api/routers/deployments.py` | Admin-facing only (`POST /api/admin/deployments`, DEPLOY-001); a future DASH-002/DEPLOY-* ticket may add admin-facing listing/cancellation here — DEPLOY-002 did not modify this file, since polling is client-facing and lives on `agent.py` instead |
+| `backend/repositories/deployment_repository.py` | DEPLOY-003/004 will extend this further with download/status-update queries; DEPLOY-002 already added the client-scoped pending-target lookup |
+| `backend/services/deployment_service.py` | DEPLOY-003/004 will extend this further with download/checksum/status-reporting business logic; DEPLOY-002 already added `poll_pending_deployment` |
+| `backend/schemas/deployment.py` | DEPLOY-003/004 will likely add request/response schemas for status reporting; DEPLOY-002 already added the polling response DTOs |
+| `agent/` (Client Agent package) | DEPLOY-003 will add the real download/execution logic that calls `GET /api/agent/deployments/poll` (DEPLOY-002) from a live Windows agent |
 | `backend/services/` | Add business logic for new features |
 | `backend/repositories/` | Extend with new data access methods |
 | `backend/models/` | Add new models only when necessary |
@@ -1091,24 +1186,23 @@ Database Persistence
 
 ## Next Recommended Work
 
-### DEPLOY-002 — Agent Polling
+### DEPLOY-003 — Installer Download & Execution
 
-**Purpose:** Allow a Client Agent to poll the server for pending deployment jobs assigned to its Client ID (FR-009 Deployment Job Retrieval), building on the now-complete deployment batch/target persistence (DEPLOY-001).
+**Purpose:** Allow a Client Agent that has retrieved a pending deployment via `GET /api/agent/deployments/poll` (DEPLOY-002) to download the associated installer, verify its SHA-256 checksum against the value already returned by the poll response, and execute it silently (FR-010 Installer Download, FR-011 Silent Software Installation).
 
 **Expected Deliverables (per Backlog):**
 
-- Polling endpoint (agent-facing, protected by the existing `require_client_api_key`, matching the router-level protection pattern already used by `backend/api/routers/agent.py`)
-- Job assignment — resolve the requesting client's own `Pending` `DeploymentTarget` (if any), scoped strictly to that authenticated client's id
-- Pending deployment retrieval — return enough information (repository package reference, silent install command, checksum) for the client to proceed to DEPLOY-003's download step
-- Status transition on retrieval (per FR-012 Deployment Status Reporting: the target should move out of `Pending` once meaningfully claimed by the client, though the exact transition point — on poll vs. on download-start — should be confirmed against FR-009's functional behavior wording before implementation)
+- Installer download endpoint/mechanism (agent-facing, protected by the existing `require_client_api_key`), scoped to the authenticated client's own deployment target — same client-isolation requirement as DEPLOY-002
+- Checksum validation — the Client Agent compares the downloaded file's computed SHA-256 against the `checksum` value already surfaced by DEPLOY-002's `DeploymentPollPackageDetail.checksum`
+- Silent installation execution using `silent_command` (already surfaced by DEPLOY-002), invoked as a direct process execution (not through a shell) per FR-011
+- Exit-code capture and retry logic per FR-010/FR-011's Error Conditions
 
 **Notes for Implementer:**
 
-- Reuse `DeploymentRepository` (DEPLOY-001) for the underlying `DeploymentTarget` queries; extend it with a client-scoped "find my pending target" method rather than duplicating query logic.
+- Reuse `DeploymentRepository`/`DeploymentService` (DEPLOY-001/002) rather than creating parallel modules; DEPLOY-002's `poll_pending_deployment` and `get_pending_target_for_client` should remain unmodified unless a defect is discovered.
+- DEPLOY-002 deliberately left `DeploymentTarget.status` at `Pending` after a poll — DEPLOY-003/004 is where `Pending → Downloading → Installing → Completed/Failed` transitions and their reporting should be implemented (FR-012).
 - Reuse the existing `require_client_api_key`/`CurrentClient` dependency (AUTH-002) for authentication — do not introduce a new client authentication mechanism.
-- A client should only ever see/retrieve its own deployment target(s), never another client's — enforce this by scoping every query to `CurrentClient.id`, mirroring the existing pattern in `backend/api/routers/agent.py`.
-- Do **not** implement installer download, checksum verification, or silent execution in this ticket — those belong to DEPLOY-003.
-- No scheduler or background services are required for polling (client-initiated polling only, per SAD §3.2/§4.6 "Client-Initiated Polling").
+- Client isolation must be preserved: a client must never be able to download or act on another client's deployment target.
 
 ---
 
@@ -1129,8 +1223,9 @@ Database Persistence
 | Repository Management (Upload) | ✅ Production Ready (REP-001) |
 | Repository Dashboard (Listing/Search/Details/Removal) | ✅ Production Ready (REP-002) |
 | Deployment Creation | ✅ Production Ready (DEPLOY-001) |
-| Client Agent | ⚠ Agent scaffolding implemented (automatic registry scanning pending deployment) |
-| Deployment Execution (polling/download/install/report) | ❌ Not yet implemented (DEPLOY-002 — current next ticket) |
+| Deployment Polling | ✅ Production Ready (DEPLOY-002 — client-scoped, read-only, no status transition) |
+| Client Agent | ⚠ Agent scaffolding implemented (automatic registry scanning and DEPLOY-002 polling consumption pending deployment) |
+| Deployment Execution (download/install/report) | ❌ Not yet implemented (DEPLOY-003 — current next ticket) |
 | Frontend Dashboard | ❌ Not yet implemented (all dashboard functionality is API-only so far) |
 
 ### Current Architecture (Summary)
@@ -1145,6 +1240,7 @@ Database Persistence
 - Repository package upload implemented: SHA-256 checksum computed at upload time, server-generated storage filenames, duplicate-entry rejection
 - Repository package dashboard implemented: administrator-facing list/search (by name/version, optional status filter), package detail retrieval, and deactivation (logical removal via `approval_status = INACTIVE`, not a physical delete)
 - Deployment creation implemented: administrator creates a batch (`Deployment`) + one `DeploymentTarget` per targeted client (initial status `Pending`), validated against package approval status, client existence, and the "one active deployment per client" business rule; fully atomic (all-or-nothing) and audit-logged
+- Deployment polling implemented: the authenticated Client Agent retrieves its own `Pending` deployment target (if any) via `GET /api/agent/deployments/poll`, strictly scoped to its own identity, with no status transition and no audit log entry (pure read)
 - Client Agent scaffolding prepared for automated Windows Registry inventory collection
 
 ### Completed Modules (Do Not Redesign)
@@ -1160,35 +1256,37 @@ Database Persistence
 - REP-001: Repository Management (Upload)
 - REP-002: Repository Dashboard (Listing/Search/Details/Deactivation)
 - DEPLOY-001: Deployment Creation (batch + per-client target persistence)
+- DEPLOY-002: Agent Polling (client-scoped `GET /api/agent/deployments/poll`, read-only, no status transition)
 
 ### Current Blockers
 
 - No automated test framework (manual verification only)
 - No scheduler/background task infrastructure
-- No administrator dashboard **UI** for viewing uploaded inventory, repository packages, deployments, or comparison results (all such functionality is API-only so far — REP-002 added the repository-package API surface and DEPLOY-001 added the deployment-creation API surface, but no Jinja2 templates are wired yet)
-- No deployment *execution* module (DEPLOY-002 through DEPLOY-004 remain unimplemented) — every deployment target created by DEPLOY-001 stays `Pending` indefinitely until those tickets land
+- No administrator dashboard **UI** for viewing uploaded inventory, repository packages, deployments, or comparison results (all such functionality is API-only so far — REP-002 added the repository-package API surface, DEPLOY-001 added the deployment-creation API surface, and DEPLOY-002 added the deployment-polling API surface, but no Jinja2 templates are wired yet)
+- No deployment *execution* module (DEPLOY-003/DEPLOY-004 remain unimplemented) — every deployment target retrieved via DEPLOY-002 polling stays `Pending` indefinitely until those tickets land
 - No admin-facing "list clients", "list inventory", or "list/history deployments" endpoints yet (planned for future dashboard-facing tickets)
 
 ### Immediate Next Task
 
-**DEPLOY-002 — Agent Polling**
+**DEPLOY-003 — Installer Download & Execution**
 
-- Implement a client-facing polling endpoint so a Client Agent can retrieve its own pending deployment target (FR-009 Deployment Job Retrieval)
+- Allow a Client Agent that has retrieved a pending deployment via `GET /api/agent/deployments/poll` (DEPLOY-002, complete) to download the associated installer, verify its SHA-256 checksum against the value already returned by the poll response, and execute it silently (FR-010 Installer Download, FR-011 Silent Software Installation)
 - Reuse the existing `require_client_api_key`/`CurrentClient` dependency (AUTH-002) — do not introduce a new client authentication mechanism
-- Extend `DeploymentRepository` (DEPLOY-001) with a client-scoped "find my pending target" query rather than duplicating query logic
-- Scope every query strictly to the authenticated client's own id — a client must never be able to retrieve another client's deployment target
-- Keep `DeploymentService.create_deployment` (DEPLOY-001), `RepositoryService`, `RepositoryPackageRepository`, and `VersionComparisonService` unmodified unless a defect is discovered
-- Installer download, checksum verification, and silent execution remain out of scope (DEPLOY-003)
+- Extend `DeploymentRepository`/`DeploymentService` (DEPLOY-001/002) rather than duplicating query/business logic
+- Scope every operation strictly to the authenticated client's own deployment target — a client must never be able to act on another client's deployment
+- Keep `DeploymentService.create_deployment` (DEPLOY-001) and `poll_pending_deployment` (DEPLOY-002) unmodified unless a defect is discovered
+- Status reporting (`Downloading`/`Installing`/`Completed`/`Failed` transitions) belongs to DEPLOY-004, per DEPLOY-002's documented design decision not to transition status on poll
 
-### Files Likely to Be Modified
+### Files Likely to Be Modified (DEPLOY-003)
 
 | File | Reason |
 |------|--------|
-| `backend/api/routers/agent.py` or a new agent-facing deployment router | Client-facing polling endpoint |
-| `backend/repositories/deployment_repository.py` | Extend with a client-scoped pending-target lookup |
-| `backend/services/deployment_service.py` or a new polling-specific service method | DEPLOY-002 business logic (resolve + possibly transition the client's own pending target) |
-| `backend/schemas/deployment.py` | Extend with a polling response schema, or add a new schema module |
-| `backend/api/dependencies.py` | Add any new DI provider needed for polling, following the existing per-service DI factory pattern |
+| `backend/api/routers/agent.py` | Add the installer-download endpoint (protected by `require_client_api_key`, same router as DEPLOY-002's poll endpoint) |
+| `backend/repositories/deployment_repository.py` | Extend with any download-specific query needed (e.g. re-resolving the client's own target by id) |
+| `backend/services/deployment_service.py` | Extend with download/checksum-verification business logic, or add a dedicated service if the ticket scope warrants it |
+| `backend/schemas/deployment.py` | Extend with any new request/response schema needed for the download step |
+| `backend/api/dependencies.py` | Add any new DI provider needed, following the existing per-service DI factory pattern |
+| `agent/deployment/`, `agent/installer/` | Client-side download/execution logic consuming DEPLOY-002's poll endpoint |
 
 ### Key Decision for REP-002 (Completed)
 
@@ -1198,9 +1296,13 @@ Repository package listing/removal was implemented using the existing Repository
 
 Dedicated `Deployment`/`DeploymentTarget` repository (`DeploymentRepository`) and service (`DeploymentService`) modules were introduced rather than extending `RepositoryPackageRepository`/`RepositoryService` — deployment jobs are a distinct entity from repository packages (PRS §7.5.4/§7.5.5), and mixing deployment-creation logic into the repository-package service would have blurred the Single Responsibility boundary the project has maintained through every ticket so far (SAD §10.14 Service Design Principles). `DeploymentService` instead *composes* a `RepositoryService` instance to reuse `get_package` for package validation, and reuses the existing `ClientRepository` for client validation — reuse through composition, not inheritance or duplication. The "one active deployment per client" business rule (Business Rule 9, PRS §2.7) was deliberately kept out of the model layer and implemented entirely in `DeploymentService`, per the design note already present on `DeploymentTarget` since CORE-002.
 
-### Key Decision for DEPLOY-002 (Upcoming)
+### Key Decision for DEPLOY-002 (Completed)
 
-Client-facing polling should reuse `DeploymentRepository` (extended, not replaced) and the existing `CurrentClient` authentication dependency. Whether the per-client `DeploymentTarget` status transitions on poll (e.g. `Pending` → `Downloading`) or only later at actual download-start (DEPLOY-003) should be resolved against FR-009's and FR-012's literal wording before implementation, since this ticket's own docstrings currently treat `Pending` as the sole "not yet retrieved" state.
+Client-facing polling reused `DeploymentRepository`/`DeploymentService` (extended, not replaced) and the existing `CurrentClient` authentication dependency, added as one new endpoint on the existing `agent.py` router rather than a new router or new `main.py` registration. The ambiguity flagged in CURRENT_STATE v1.1 — whether `DeploymentTarget.status` should transition on poll (e.g. `Pending` → `Downloading`) or only later at actual download-start (DEPLOY-003) — was resolved in favor of **no transition on poll**: FR-009's functional behavior (steps 1–6) describes only searching for and returning a pending deployment, while FR-012 explicitly ties the `Pending → Downloading` transition to the Client Agent *reporting* the start of its installer download (FR-010), which is DEPLOY-003/DEPLOY-004 scope. A new, `Pending`-only repository query (`get_pending_target_for_client`) was added rather than reusing DEPLOY-001's broader `ACTIVE_DEPLOYMENT_STATUSES` query, keeping the two concerns (Business-Rule-9 enforcement at creation time vs. "what does this client still need to retrieve") cleanly separated. Client isolation is enforced at the SQL `WHERE` clause using only the authenticated `CurrentClient.id` — never a client id from request input.
+
+### Key Decision for DEPLOY-003 (Upcoming)
+
+Installer download should reuse `DeploymentRepository`/`DeploymentService` and the same `CurrentClient`-derived client-isolation pattern DEPLOY-002 established (scope every query/action to the authenticated client's own target — never accept a client id from request input as an authorization boundary). The checksum value the Client Agent will verify against is already available from DEPLOY-002's poll response (`DeploymentPollPackageDetail.checksum`), so DEPLOY-003 does not need to re-fetch or duplicate that lookup — it can be treated as already resolved by the time a client requests a download, provided the download endpoint re-validates the target still belongs to the requesting client. Whether `DeploymentTarget.status` transitions to `Downloading` at the start of the download (FR-010/FR-012) or only when the client explicitly reports it (a later status-reporting call) should be resolved against FR-012's literal wording before implementation.
 
 ---
 
