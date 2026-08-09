@@ -1,6 +1,6 @@
 # CURRENT_STATE.md
 
-**Version:** 1.0  
+**Version:** 1.1  
 **Last Updated:** August 9, 2026
 
 ---
@@ -23,7 +23,7 @@ A proof-of-concept centralized software patch management system for Windows comp
 | Frontend | Bootstrap 5 (Jinja2 Templates not yet wired) |
 |Client Agent | Inventory collection scaffolding implemented (server-side inventory upload complete)|
 | Authentication | Admin: Session + CSRF cookie; Client: Bearer API Key (SHA-256) |
-| Deployment | Local Package Repository (upload + administrator dashboard listing/search/details/deactivation implemented — REP-001, REP-002; deployment execution not yet implemented) |
+| Deployment | Local Package Repository (upload + administrator dashboard listing/search/details/deactivation implemented — REP-001, REP-002); deployment **creation** implemented (DEPLOY-001 — batch + per-client target persistence, initial `Pending` status); deployment execution (download/install/report/poll) not yet implemented |
 | File Handling | `python-multipart` (installer upload parsing), SHA-256 (`hashlib`, standard library) |
 
 ### Architecture
@@ -58,8 +58,9 @@ backend/
 │   │   ├── agent.py               # Protected agent endpoints (ping, heartbeat, inventory upload)
 │   │   ├── registration.py        # POST /api/register (CLIENT-001)
 │   │   ├── updates.py             # Admin version-comparison endpoint (INV-002)
-│   │   └── repository.py          # Admin installer upload (REP-001) + list/detail/deactivate (REP-002)
-│   └── dependencies.py            # DI providers (admin + client + services)
+│   │   ├── repository.py          # Admin installer upload (REP-001) + list/detail/deactivate (REP-002)
+│   │   └── deployments.py         # Admin deployment creation endpoint (DEPLOY-001)
+│   └── dependencies.py            # DI providers (admin + client + services); extended (DEPLOY-001): DeploymentServiceDependency
 ├── core/
 │   ├── config.py                  # Extended (REP-001): MAX_INSTALLER_UPLOAD_SIZE_MB
 │   ├── security.py                # Token/hash primitives
@@ -89,8 +90,9 @@ backend/
 │   ├── client_repository.py               # Extended (INV-002): get_by_id
 │   ├── client_provisioning_key_repository.py
 │   ├── software_inventory_repository.py   # INV-001 inventory persistence
-│   └── repository_package_repository.py   # Extended (REP-001): create, get_active_conflict
-│                                           # Extended (REP-002): list_all, get_by_id, deactivate
+│   ├── repository_package_repository.py   # Extended (REP-001): create, get_active_conflict
+│   │                                       # Extended (REP-002): list_all, get_by_id, deactivate
+│   └── deployment_repository.py           # NEW (DEPLOY-001): Deployment/DeploymentTarget data access
 ├── services/
 │   ├── auth_service.py
 │   ├── client_auth_service.py
@@ -98,7 +100,8 @@ backend/
 │   ├── heartbeat_service.py
 │   ├── inventory_service.py               # Inventory synchronization service
 │   ├── version_comparison_service.py      # FR-007 version comparison business logic (INV-002)
-│   └── repository_service.py              # FR-006 installer upload (REP-001) + list/get/deactivate (REP-002)
+│   ├── repository_service.py              # FR-006 installer upload (REP-001) + list/get/deactivate (REP-002)
+│   └── deployment_service.py              # NEW (DEPLOY-001): FR-008/FR-009 deployment creation business logic
 ├── utils/
 │   ├── version_compare.py                 # FR-007 name/version matching + comparison rules (INV-002)
 │   └── file_storage.py                    # FR-006 extension validation, SHA-256 hashing, file streaming (REP-001)
@@ -107,8 +110,9 @@ backend/
     ├── client.py
     ├── inventory.py                       # Inventory upload request schemas
     ├── updates.py                         # Version comparison response schemas (INV-002)
-    └── repository.py                      # Upload metadata + response schemas (REP-001); list response,
-                                            # created_at/updated_at fields (REP-002)
+    ├── repository.py                      # Upload metadata + response schemas (REP-001); list response,
+    │                                       # created_at/updated_at fields (REP-002)
+    └── deployment.py                      # NEW (DEPLOY-001): deployment creation request/response schemas
 
 agent/                                     # Client Agent (initial implementation)
 ├── communication/                         # Server communication helpers
@@ -131,9 +135,9 @@ tests/                                     # Empty skeleton (no pytest configure
 
 | Metric                    | Status                                          |
 | ------------------------- | ------------------------------------------------ |
-| **Current Version**       | v1.0                                            |
-| **Development Stage**     | DEPLOY-001 — Deployment Creation (not yet started)|
-| **Latest Stable Release** | REP-002 — Repository Dashboard                  |
+| **Current Version**       | v1.1                                            |
+| **Development Stage**     | DEPLOY-002 — Agent Polling (not yet started)    |
+| **Latest Stable Release** | DEPLOY-001 — Deployment Creation                |
 | **Repository Status**     | Active Development                              |
 | **Architecture Status**   | Stable                                          |
 | **Regression Status**     | No known regressions from completed tickets     |
@@ -152,16 +156,17 @@ tests/                                     # Empty skeleton (no pytest configure
 | v0.8    | INV-002 — Version Comparison                          |
 | v0.9    | REP-001 — Repository Management                       |
 | v1.0    | REP-002 — Repository Dashboard                        |
+| v1.1    | DEPLOY-001 — Deployment Creation                      |
 
 ### Current Ticket
 
-**REP-002 — Repository Dashboard** ✅ Complete
+**DEPLOY-001 — Deployment Creation** ✅ Complete
 
 ### Next Ticket
 
-**DEPLOY-001 — Deployment Creation**
+**DEPLOY-002 — Agent Polling**
 
-**Purpose:** Allow an administrator to create deployment jobs targeting one or more registered clients (FR-008, FR-009), building on the now-complete repository package catalog (REP-001, REP-002) and version comparison (INV-002).
+**Purpose:** Allow a Client Agent to poll the server for pending deployment jobs assigned to its Client ID (FR-009 Deployment Job Retrieval), building on the now-complete deployment batch/target persistence (DEPLOY-001).
 
 ---
 
@@ -528,6 +533,67 @@ Database Persistence
 **Important Note:** REP-002 is API-only, matching the current state of the project's frontend (no Jinja2 templates wired yet). Metadata *editing* (e.g. changing an uploaded package's silent install command) remains unimplemented and out of scope, as it was not part of this ticket's deliverables.
 
 ---
+
+### DEPLOY-001 — Deployment Creation
+
+| Status | ✅ Production Ready |
+
+**Objective:** Implement Deployment Creation (Backlog DEPLOY-001, FR-008 Deployment Job Creation, FR-009 Deployment Job Retrieval targeting): allow an administrator to create a deployment batch selecting one approved repository package and one or more registered target clients, creating one `Deployment` (batch) record and one `DeploymentTarget` record per targeted client, each initialized to `Pending` status.
+
+**Features Implemented:**
+
+- `DeploymentRepository` (new, `backend/repositories/deployment_repository.py`) — pure data-access layer for the pre-existing (CORE-002) `Deployment`/`DeploymentTarget` tables, which no repository had consumed until this ticket (the same deferral pattern already used for `RepositoryPackageRepository` prior to INV-002):
+  - `create_deployment` — persists a new `Deployment` (batch) row
+  - `add_target` — persists a new `DeploymentTarget` row for one client, defaulting to `DeploymentStatus.PENDING`
+  - `get_active_target_for_client` / `get_active_targets_for_clients` — single-client and batched lookups (via the pre-existing `ix_deployment_targets_client_status` index) for any `DeploymentTarget` whose status is not yet terminal (`Pending`, `Downloading`, or `Installing`), used to enforce Business Rule 9
+  - `get_by_id` — resolves a `Deployment` by primary key
+  - Module-level `ACTIVE_DEPLOYMENT_STATUSES` constant (`Pending`, `Downloading`, `Installing`) — the existing `DeploymentStatus` enum's non-terminal values, reused rather than a new status vocabulary being invented
+- `DeploymentService` (new, `backend/services/deployment_service.py`) — `create_deployment(...)` orchestrates the full FR-008 creation workflow, entirely as validation-before-mutation so no partial batch can ever be left behind:
+  1. **Package validation** — resolves the repository package via the existing `RepositoryService.get_package` (REP-002, composed rather than duplicated), which already raises `RepositoryPackageNotFoundError` (404) for an unknown id; additionally rejects (`DeploymentPackageUnavailableError`, 400) a package that exists but is not currently `Approved` (i.e. has been deactivated/"removed" per FR-017)
+  2. **Client validation** — resolves every requested `client_id` via the existing `ClientRepository.get_by_id` (INV-002), de-duplicating defensively and raising `DeploymentClientNotFoundError` (404) listing every unknown id if any are missing
+  3. **Active-deployment validation** — Business Rule 9 (PRS Section 2.7: "A client may process only one deployment job at a time"), enforced here in the Service Layer (explicitly *not* as model-level logic, per this ticket's instructions) via `DeploymentRepository.get_active_targets_for_clients`; raises `DeploymentClientActiveError` (409) listing every conflicting client id if any target client already has a non-terminal deployment target
+  4. **Atomic creation** — only after all three validations succeed: one `Deployment` row is created, then one `DeploymentTarget` row per validated client (status `Pending`), then one `DEPLOYMENT_CREATED` audit log entry, then a single `db.commit()`
+  - New exceptions (`AppException` subclasses, following the existing `RepositoryPackageValidationError`/`RepositoryPackageConflictError` pattern): `DeploymentPackageUnavailableError` (400), `DeploymentClientNotFoundError` (404), `DeploymentClientActiveError` (409)
+- `backend/schemas/deployment.py` (new):
+  - `DeploymentCreateRequest` — `repository_package_id: UUID`, `client_ids: List[UUID]` (`min_length=1`); a `field_validator` rejects a request listing the same client more than once (`DeploymentTarget`'s own `uq_deployment_target_deployment_client` unique constraint would reject this at the database layer regardless, but failing fast here returns a clearer `422` instead of surfacing a database integrity error)
+  - `DeploymentTargetResponse` — one targeted client's initial state (`id`, `client_id`, `status`, `created_at`)
+  - `DeploymentResponse` — the created batch (`id` — serves as the PRS's "Batch ID" — `repository_id`, `created_by_admin_id`, `created_at`, `targets: list[DeploymentTargetResponse]`, `target_count`)
+- New administrator-facing, state-changing endpoint: `POST /api/admin/deployments` (Backlog DEPLOY-001 "Deployment creation API" deliverable), added on a new `backend/api/routers/deployments.py` router (`prefix="/api/admin/deployments"`, grouped like `repository.py`/`updates.py`)
+  - Protected by `CurrentAdministrator` (session cookie) **and** `CSRFProtection` (state-changing request, NFR-028) — the same pattern as `POST /api/admin/repository/packages`
+  - Returns `201 Created` with the created batch's id, package reference, administrator reference, and the full list of created targets (each `Pending`) on success
+  - Router stays thin: authenticates, delegates the entire request body straight to `DeploymentService.create_deployment`, and shapes the response — no business logic lives in the router
+- `backend/api/dependencies.py` extended: `get_deployment_service` / `DeploymentServiceDependency`, following the existing per-service DI factory pattern (`DeploymentService()` constructed fresh per request, stateless like every other service)
+- `backend/main.py` extended: registers the new `deployments_router`
+
+**Design Decisions (Documented):**
+
+- **Composition over duplication for package validation:** `DeploymentService` takes a `RepositoryService` dependency (constructor-injected, defaulting to a fresh instance) and calls its existing `get_package` method rather than re-implementing package lookup against `RepositoryPackageRepository` directly. This mirrors this ticket's explicit instruction to reuse existing repository/service methods rather than duplicate package-validation logic.
+- **Active-deployment rule lives in the Service Layer, not the model:** `DeploymentTarget`'s own docstring (introduced by CORE-002) already anticipated this, describing Business Rule 9 as "a *business* rule, enforced by the Service Layer in DEPLOY-001" and pointing at the `ix_deployment_targets_client_status` index as the supporting data-layer artifact. No new database constraint (e.g. a partial unique index limiting one non-terminal target per client) was added — the existing index is sufficient for an efficient service-layer check, and adding a hard database constraint was judged unnecessary and outside this ticket's minimal-change scope.
+- **Non-terminal status set:** `Pending`, `Downloading`, and `Installing` are treated as "active" (i.e. a client currently "processing" a deployment per Business Rule 9's wording); `Completed`, `Failed`, and `Cancelled` are terminal. These are the pre-existing `DeploymentStatus` enum values (FR-012) — no new status was introduced.
+- **Atomicity without explicit rollback calls:** Every validation step runs to completion *before* any `Deployment`/`DeploymentTarget` row is created. Because `backend.database.session.get_db` never calls `db.commit()` itself (only `close()` in its `finally` block) and this service's own `db.commit()` sits at the very end of `create_deployment` (after every validation has already succeeded), any exception raised during validation propagates out of the method with nothing yet committed — any rows `flush()`-ed by an earlier step in the *same* method call are simply discarded when the session is later closed without a commit. This matches the pattern already used by every other service in this codebase (`RepositoryService.upload_package`, `InventoryService`, etc.), so no new transaction-management pattern was introduced.
+- **Duplicate-client rejection at two layers:** `DeploymentCreateRequest`'s Pydantic validator rejects a request listing the same client id twice (422, before the service is even invoked); `DeploymentService._validate_clients` additionally de-duplicates defensively, since the service layer is this project's authoritative validation boundary and must not assume every caller goes through the schema layer.
+- **Response shape:** `DeploymentResponse.id` doubles as the PRS's "Batch ID" (per the existing design note in `backend/models/deployment.py`, `Deployment.id` already serves this grouping purpose — no separate `batch_id` column exists on the model). `target_count` is a derived convenience field (not a stored column) so API consumers do not need to count `len(targets)` themselves.
+
+**Manual/Scripted Verification (via `TestClient` against a full FastAPI app + real SQLite database):**
+
+- ✅ Successful creation targeting 2 clients: `201 Created`; response contains the batch id, the correct `repository_id`/`created_by_admin_id`, and exactly 2 targets, each `status: "Pending"`
+- ✅ Unauthenticated request (no administrator session): rejected `401 Unauthorized`
+- ✅ Missing/invalid CSRF token: rejected `403 Forbidden`
+- ✅ Duplicate client id within the same request: rejected `422` at the schema validation layer, before the service is invoked
+- ✅ Nonexistent repository package id: rejected `404 Not Found` (`RepositoryPackageNotFoundError`, reused unmodified from REP-002)
+- ✅ Repository package that exists but is `Inactive` (deactivated): rejected `400 Bad Request` (`DeploymentPackageUnavailableError`)
+- ✅ Nonexistent target client id: rejected `404 Not Found` (`DeploymentClientNotFoundError`), naming the missing id
+- ✅ Target client that already has an active (`Pending`) deployment target from a prior successful request: rejected `409 Conflict` (`DeploymentClientActiveError`), naming the conflicting client id
+- ✅ Empty `client_ids` list: rejected `422` (schema `min_length=1` constraint)
+- ✅ **Atomicity verified directly against the database:** after exercising every rejection scenario above, exactly one `Deployment` row and exactly two `DeploymentTarget` rows exist in total — confirming no partial batch, orphaned deployment, or orphaned target was ever left behind by a rejected request
+- ✅ **Audit logging verified directly against the database:** exactly one `DEPLOYMENT_CREATED` audit log entry exists (recorded only for the single successful creation; no entry was written for any of the rejected attempts, consistent with nothing committing on a validation failure)
+- ✅ Full application import and OpenAPI schema generation confirmed `POST /api/admin/deployments` registers correctly alongside all existing routes
+- ✅ `pyflakes` reports no warnings across all new/modified files
+- ✅ No regressions detected in CORE-001, CORE-002, AUTH-001, AUTH-002, CLIENT-001, CLIENT-002, INV-001, INV-002, REP-001, or REP-002 — `RepositoryService`, `RepositoryPackageRepository`, `VersionComparisonService`, `ClientRepository`, and every existing endpoint were not behaviorally modified beyond the additive `DeploymentServiceDependency` in `backend/api/dependencies.py` and the additive router registration in `backend/main.py`
+
+**Important Note:** No database schema or migration changes were required — `Deployment` and `DeploymentTarget` (defined by CORE-002) already had every column this ticket needed (including the `uq_deployment_target_deployment_client` unique constraint and `ix_deployment_targets_client_status` index). Deployment *execution* — agent polling (DEPLOY-002), installer download/checksum verification (DEPLOY-003), silent installation and status reporting (DEPLOY-003/DEPLOY-004), and deployment cancellation (a later ticket per the Backlog) — remains entirely unimplemented; every newly created `DeploymentTarget` will remain `Pending` indefinitely until a future ticket implements client-side retrieval and execution.
+
+---
 ## Current System State
 
 ### APIs Available (Implemented)
@@ -544,6 +610,7 @@ Database Persistence
 | GET    | `/api/admin/repository/packages`          | List/search repository packages (FR-006, REP-002)         | Admin session                         |
 | GET    | `/api/admin/repository/packages/{package_id}` | Retrieve a single repository package's details (REP-002) | Admin session                     |
 | POST   | `/api/admin/repository/packages/{package_id}/deactivate` | Deactivate ("remove") a repository package (FR-017, REP-002) | Admin session + CSRF          |
+| POST   | `/api/admin/deployments`                  | Create a deployment batch targeting one or more clients (FR-008, FR-009) | Admin session + CSRF  |
 | POST   | `/api/register`                           | Client registration                                       | Provisioning key or existing API key  |
 | GET    | `/api/agent/ping`                         | Verify client authentication                              | Client API key                        |
 | POST   | `/api/agent/heartbeat`                    | Report client heartbeat                                   | Client API key                        |
@@ -555,9 +622,10 @@ Database Persistence
 - Tables: `administrators`, `administrator_sessions`, `clients`, `client_provisioning_keys`, `software_inventories`, `repository_packages`, `deployments`, `deployment_targets`, `audit_logs`, `alembic_version`
 - All models use UUID primary keys
 - Relationships and constraints defined
-- Audit logging integrated for all authentication, registration, repository upload, and repository deactivation events
+- Audit logging integrated for all authentication, registration, repository upload, repository deactivation, and deployment creation events
 - **No schema changes in REP-001** — `repository_packages` already had every column this ticket needed (CORE-002); no migration was added
 - **No schema changes in REP-002** — the listing, detail, and deactivation operations use only existing `repository_packages` columns (including `created_at`/`updated_at`, already present via `AuditModel`); no migration was added
+- **No schema changes in DEPLOY-001** — `deployments` and `deployment_targets` (CORE-002) already had every column, constraint, and index this ticket needed (`uq_deployment_target_deployment_client`, `ix_deployment_targets_client_status`); no migration was added. `deployments`/`deployment_targets` now contain real rows for the first time since CORE-002 defined them.
 
 ### Authentication Status
 
@@ -568,6 +636,7 @@ Database Persistence
 - `Secure` flag configurable (`SESSION_COOKIE_SECURE`, default `False` for HTTP-only prototype — **must set `True` for HTTPS**)
 - `POST /api/admin/repository/packages` (REP-001) requires both the session cookie and a valid CSRF token, consistent with every other state-changing administrator endpoint
 - `POST /api/admin/repository/packages/{package_id}/deactivate` (REP-002) likewise requires both the session cookie and a valid CSRF token; `GET /api/admin/repository/packages` and `GET /api/admin/repository/packages/{package_id}` (REP-002) are read-only and require only the session cookie, consistent with `GET /api/admin/clients/{client_id}/updates` (INV-002)
+- `POST /api/admin/deployments` (DEPLOY-001) likewise requires both the session cookie and a valid CSRF token, since deployment creation is state-changing
 
 **Client:**
 
@@ -646,18 +715,52 @@ Database Persistence
    └── Each installed item classified: Up-to-Date / Update Available / Not Managed
 ```
 
-## Deployment Workflow (Not Yet Implemented)
+### Deployment Creation Workflow (New — DEPLOY-001)
 
-- Local Package Repository: **upload implemented (REP-001)**, **administrator listing/search/details/deactivation implemented (REP-002)** — deployment execution (DEPLOY-*) remains not yet implemented
+```text
+1. Administrator authenticates
+   → POST /api/admin/login
+
+2. Administrator selects an approved package and one or more clients,
+   then creates a deployment batch
+   → POST /api/admin/deployments
+   (JSON body: repository_package_id, client_ids: [...])
+   ├── Repository package existence + Approved status validated
+   │   (reuses RepositoryService.get_package, REP-002)
+   ├── Every client_id validated against registered clients
+   │   (reuses ClientRepository.get_by_id, INV-002)
+   ├── Duplicate client_ids rejected (schema-level, 422)
+   ├── Clients with an existing active (Pending/Downloading/Installing)
+   │   deployment target rejected (Business Rule 9, PRS §2.7) → 409
+   ├── One Deployment (batch) record created
+   ├── One DeploymentTarget record created per validated client,
+   │   status: Pending
+   ├── DEPLOYMENT_CREATED audit log entry recorded
+   └── All of the above committed atomically — a rejected request
+       never leaves a partial Deployment/DeploymentTarget behind
+
+3. (Future — DEPLOY-002/DEPLOY-003/DEPLOY-004) Client Agent polls for
+   its Pending deployment target, downloads the installer, executes it
+   silently, and reports the result back to the server — not yet
+   implemented; every DeploymentTarget created above remains Pending
+   indefinitely until those tickets are completed
+```
+
+## Deployment Workflow (Partially Implemented — Creation Only)
+
+- Local Package Repository: **upload implemented (REP-001)**, **administrator listing/search/details/deactivation implemented (REP-002)**
+- Deployment Creation: **implemented (DEPLOY-001)** — `POST /api/admin/deployments` creates a batch + one Pending target per targeted client; validated against package approval status, client existence, and Business Rule 9 (one active deployment per client)
+- Deployment *execution* — agent polling (DEPLOY-002), installer download/execution (DEPLOY-003), status reporting (DEPLOY-004), deployment cancellation, and a deployment-history dashboard remain **not yet implemented**
 - Silent Installers: not yet executed by a deployment (silent command is validated and stored at upload time; execution belongs to DEPLOY-003 client-side work, already partially anticipated by the existing FR-011 direct-process-execution design)
 - SHA-256 Package Validation: **upload-time computation now implemented** (REP-001, `RepositoryPackage.checksum`); download-time re-verification by the Client Agent (FR-010/FR-011) remains part of future DEPLOY-* tickets
 
 ### Existing Infrastructure
 
-- **No automated test framework** configured (`pytest` not in `requirements.txt`; `tests/` directory remains an empty skeleton). All verification is currently performed through manual API testing, PowerShell scripts, direct SQLite inspection, and (for INV-002/REP-001) ad hoc scripted verification using FastAPI's `TestClient`.
+- **No automated test framework** configured (`pytest` not in `requirements.txt`; `tests/` directory remains an empty skeleton). All verification is currently performed through manual API testing, PowerShell scripts, direct SQLite inspection, and (for INV-002/REP-001/DEPLOY-001) ad hoc scripted verification using FastAPI's `TestClient`.
 - **No scheduler/background tasks** — client `OFFLINE` status is currently computed at read time rather than maintained by a background service. Version comparison (INV-002) follows this same "computed at read time" pattern.
 - **Repository package listing/detail/deactivation implemented (REP-002)** — `GET /api/admin/repository/packages` (list/search), `GET /api/admin/repository/packages/{package_id}` (details), and `POST /api/admin/repository/packages/{package_id}/deactivate` (remove) are all available. Metadata *editing* (e.g. changing the silent install command after upload) remains unimplemented.
 - **No administrator-facing inventory or client listing endpoints** — client registration and software inventory data are stored successfully and can be compared against the repository (INV-002) and now populated via real uploads (REP-001) and browsed via the repository dashboard endpoints (REP-002), but there is still no general "list clients" or "list inventory" endpoint. These capabilities remain planned for a future dashboard-facing ticket.
+- **Deployment creation implemented (DEPLOY-001)** — `POST /api/admin/deployments` creates a batch + one Pending target per targeted client. There is still no administrator-facing "list deployments"/"deployment history" endpoint (DASH-002/a future ticket) and no client-facing polling endpoint yet (DEPLOY-002), so a created deployment currently has no way to progress beyond `Pending` or be observed again after creation except via direct database inspection.
 - **Client Agent scaffolding implemented** — communication layer, inventory scanner, and application entry point exist; automated Windows Registry inventory collection will be exercised through the deployed Windows Agent in future milestones.
 - **No frontend UI** (Jinja2 templates not yet wired; HTMX optional and not yet implemented).
 - **No CORS configuration for credentialed cross-origin clients** — `CORS_ORIGINS` currently defaults to `"*"` with `allow_credentials=True`, which browsers reject. This is acceptable for the current same-origin prototype but will require explicit origin configuration before introducing a separate frontend.
@@ -770,12 +873,22 @@ Database Persistence
 | **Regression**   | Passed (`TestClient`-based end-to-end verification of listing, search, status filtering, package details, not-found handling, missing-CSRF rejection, and successful deactivation; `pyflakes` clean; `RepositoryService.upload_package`, `VersionComparisonService`, and `RepositoryPackageRepository.list_approved`/`get_active_conflict`/`create` were not behaviorally modified) |
 
 ---
+
+### DEPLOY-001 — Deployment Creation
+
+| Status           | ✅ Production Ready                                                                                                                                         |
+| ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Purpose**      | Allow an administrator to create a deployment batch targeting one or more registered clients with a single approved repository package (FR-008 Deployment Job Creation, FR-009 Deployment Job Retrieval targeting) |
+| **Deliverables** | `backend/repositories/deployment_repository.py` (`DeploymentRepository`), `backend/services/deployment_service.py` (`DeploymentService` + `DeploymentPackageUnavailableError`/`DeploymentClientNotFoundError`/`DeploymentClientActiveError`), `backend/schemas/deployment.py` (`DeploymentCreateRequest`/`DeploymentTargetResponse`/`DeploymentResponse`), `backend/api/routers/deployments.py`, `POST /api/admin/deployments`, `DeploymentServiceDependency` |
+| **Design Decisions** | Business Rule 9 ("one active deployment per client") enforced in the Service Layer, not the model, per the design note already present on `DeploymentTarget`; `Pending`/`Downloading`/`Installing` treated as active/non-terminal (existing `DeploymentStatus` values, no new status introduced); package validation reuses `RepositoryService.get_package` (composition, not duplication); full validation (package → clients exist → clients not active) runs before any row is created, so a rejected request never leaves a partial batch; single `db.commit()` at the end, consistent with every other service's transaction pattern |
+| **Regression**   | Passed (`TestClient`-based end-to-end verification of successful creation, unauthenticated/missing-CSRF rejection, duplicate-client/empty-list schema rejection, nonexistent/inactive-package rejection, nonexistent-client rejection, active-deployment-conflict rejection; atomicity and audit-log-count verified by direct database inspection after exercising every rejection path; `pyflakes` clean; `RepositoryService`, `RepositoryPackageRepository`, `VersionComparisonService`, and `ClientRepository` were not behaviorally modified) |
+
+---
 ## Pending Backlog
 
 | Ticket | Purpose | Dependencies | Priority |
 |--------|---------|--------------|----------|
-| **DEPLOY-001** | Deployment Creation — create deployment tasks | INV-002 (Version Comparison), REP-002 (Repository Dashboard) | Next |
-| **DEPLOY-002** | Agent Polling — clients poll for deployments | DEPLOY-001 | - |
+| **DEPLOY-002** | Agent Polling — clients poll for deployments | DEPLOY-001 (Deployment Creation) | Next |
 | **DEPLOY-003** | Installer Download & Execution — client-side | DEPLOY-002 | - |
 | **DEPLOY-004** | Deployment Status Reporting — client reports completion | DEPLOY-003 | - |
 | **DASH-001** | Dashboard Home | AUTH-001, INV-001, REP-001 | - |
@@ -859,6 +972,13 @@ Database Persistence
 - Duplicate-entry detection (`RepositoryPackageRepository.get_active_conflict`) reuses INV-02's `normalize_software_name` rather than introducing a second name-normalization rule, keeping "does this package already exist" and "does this installed item match a package" consistent
 - `RepositoryService.upload_package` orders its checks (extension → duplicate → file write) to fail cheaply before performing the most expensive operation (streaming a potentially large file to disk)
 
+### Deployment Creation Strategy (DEPLOY-001)
+- `DeploymentRepository` follows the exact same "pure data-access, no business rules" separation already established by `RepositoryPackageRepository`/`ClientRepository` — the active-deployment lookup methods (`get_active_target_for_client`/`get_active_targets_for_clients`) only *query*; the decision to reject based on their result is made entirely in `DeploymentService`
+- `DeploymentService` composes a `RepositoryService` instance (constructor-injected, defaulting to `RepositoryService()`) to reuse `get_package` rather than querying `RepositoryPackageRepository` directly a second time — the same "reuse an existing service rather than duplicate its logic" approach the ticket instructions required
+- Validation is strictly ordered and front-loaded: package → clients-exist → clients-not-active, all performed before any `Deployment`/`DeploymentTarget` row is created, so a request that will ultimately fail never leaves partial state behind and never has to be "undone"
+- No explicit `db.rollback()` call was added anywhere: because every service method in this codebase (including this one) defers `db.commit()` until the very end of a successful operation, and `get_db()`'s `finally` block only ever calls `db.close()` (never `commit()`), an exception raised mid-method simply results in the session being closed without committing — any `flush()`-ed-but-uncommitted rows are discarded automatically. This is the same implicit pattern already relied upon by every other service.
+- `ACTIVE_DEPLOYMENT_STATUSES` (`Pending`, `Downloading`, `Installing`) is defined once, at module scope in `deployment_repository.py`, rather than being duplicated as a literal tuple inside `DeploymentService` — future DEPLOY-* tickets needing the same "is this target still active" concept should import this constant rather than re-deriving it
+
 ### Future Migration Considerations
 - SQLAlchemy dialect-portable `Uuid` type used for all primary/foreign keys (deliberate deviation from PRS's illustrative auto-increment integers — documented in `backend/models/base.py`)
 - `Secure` cookie flag configurable — must be set `True` once HTTPS is deployed
@@ -872,7 +992,7 @@ Database Persistence
 |-------|--------|--------|
 | **No automated test framework** | Tracked | All verification manual/scripted; `tests/` empty; `pytest` not in requirements |
 | **Router-level agent protection not automatically inherited** | Process risk | Future routers must independently apply `dependencies=[Depends(require_client_api_key)]` unless documented exception (registration) |
-| **No admin-facing listing endpoints** | Tracked | Clients, provisioning keys, and repository packages only visible via direct database inspection or (for repository packages) indirectly through the version-comparison endpoint; REP-002 is expected to add a repository package listing view |
+| **No admin-facing listing endpoints** | Tracked | Clients, provisioning keys, and repository packages only visible via direct database inspection or (for repository packages) indirectly through the version-comparison endpoint; REP-002 added a repository package listing view, but there is still no "list clients" or "list deployments" endpoint |
 | **`RepositoryPackage` has no `publisher` column** | Tracked | FR-007's optional publisher-based match disambiguation cannot be applied against the repository catalog until/unless a future ticket adds this column and a migration |
 | **No approval workflow for uploaded packages** | Tracked | REP-001 persists every valid upload directly as `APPROVED`; if a future requirement calls for a distinct upload → pending-approval → approved workflow, this will need a follow-up ticket |
 | **Pre-existing cosmetic nit** | Untouched | `auth.py` declares unused `logger` (not called, left per "do not modify completed tickets unless integration requires") |
@@ -881,7 +1001,9 @@ Database Persistence
 | **No expiration/revocation for provisioning keys** | Future work | Issued-but-never-claimed keys remain valid indefinitely; worth revisiting with dashboard/key-management ticket |
 | **No scheduler for OFFLINE detection** | Design choice | Offline status computed at read time; background jobs not yet introduced |
 | **`updated_at` serves as registration timestamp** | Implicit | No separate `last_registration` field; registration updates touch `updated_at` |
-| **No client-side download-time checksum re-verification yet** | Tracked | REP-001 computes and stores the checksum at upload time (FR-006); the Client Agent's download-time re-verification (FR-010/FR-011) is DEPLOY-* scope, not yet implemented |
+| **No client-side download-time checksum re-verification yet** | Tracked | REP-001 computes and stores the checksum at upload time (FR-006); the Client Agent's download-time re-verification (FR-010/FR-011) is DEPLOY-003 scope, not yet implemented |
+| **Deployment targets have no way to progress past `Pending`** | Tracked | DEPLOY-001 only creates batches/targets; agent polling (DEPLOY-002), installer download/execution (DEPLOY-003), and status reporting (DEPLOY-004) remain unimplemented, so every created `DeploymentTarget` stays `Pending` indefinitely until those tickets land |
+| **No deployment cancellation or history endpoint yet** | Tracked | A created deployment can currently only be observed via direct database inspection; a future ticket (DASH-002 or a dedicated DEPLOY-* ticket) is expected to add listing/cancellation |
 
 ---
 
@@ -920,6 +1042,7 @@ Database Persistence
 - Registration, inventory, repository, deployment operations logged
 - Version comparison (INV-002) logs at DEBUG level only (a read-only query, not a state-changing operation warranting an audit-log entry — no FR-007 examples appear in the PRS's audit-logged-events list)
 - Repository package uploads (REP-001) are audit-logged at INFO (`REPOSITORY_PACKAGE_UPLOADED`) on success and WARNING (`REPOSITORY_UPLOAD_CONFLICT`) on a rejected duplicate, matching the PRS's explicit "Repository Uploads" audit-logged-events entry
+- Deployment creation (DEPLOY-001) is audit-logged at INFO (`DEPLOYMENT_CREATED`) on success only, matching the PRS's explicit "Deployment Creation" audit-logged-events entry; rejected requests (unknown/inactive package, unknown client, active-deployment conflict) are not audit-logged, since nothing is committed on those paths (mirroring the "commit-time-only" logging pattern already used by `REPOSITORY_PACKAGE_UPLOADED`)
 - Unexpected errors logged globally by `backend/core/exceptions.py`
 
 ### Error Handling
@@ -927,17 +1050,19 @@ Database Persistence
 - `AppException` (and `AuthenticationError` subclass) is standard base for all business-rule errors
 - `ClientNotFoundError` (INV-002, `backend/api/routers/updates.py`) follows this same `AppException` pattern for its 404 case
 - `RepositoryPackageValidationError` (400) and `RepositoryPackageConflictError` (409) (REP-001, `backend/services/repository_service.py`) follow the same pattern for their respective cases; `RepositoryPackageMetadataError` (400, `backend/api/routers/repository.py`) adapts a Pydantic `ValidationError` raised while manually constructing `RepositoryPackageUploadMetadata` from `Form(...)` fields into the same standard envelope
+- `DeploymentPackageUnavailableError` (400), `DeploymentClientNotFoundError` (404), and `DeploymentClientActiveError` (409) (DEPLOY-001, `backend/services/deployment_service.py`) follow the same `AppException` pattern for their respective cases; `RepositoryPackageNotFoundError` (404, REP-002) is reused unmodified for the "unknown package" case rather than being re-implemented
 - Global handlers convert Pydantic validation errors and unhandled exceptions to standard `{"success", "message", "error"}` envelope
 
 ### Security Standards
 - Passwords: bcrypt via Passlib, never plaintext
 - API Keys: `secrets.token_urlsafe`, unique, SHA-256 hash-at-rest
 - Session Cookies: HttpOnly, `Secure` configurable, CSRF-protected (double-submit)
-- Repository Packages: SHA-256 computed and stored at upload time (REP-001); download-time re-verification by the Client Agent remains DEPLOY-* scope
+- Repository Packages: SHA-256 computed and stored at upload time (REP-001); download-time re-verification by the Client Agent remains DEPLOY-003 scope
 - Repository Packages: server-generated, sanitized storage filenames only — the client-supplied filename is never used for storage or path construction; uploads are size-bounded (`MAX_INSTALLER_UPLOAD_SIZE_MB`) and extension-validated against the declared installer type
-- Deployments: Validate package integrity before execution (not yet implemented)
+- Deployments: package must be `Approved` at creation time (DEPLOY-001, enforced via `DeploymentService`/`RepositoryService.get_package`); installer-level integrity verification before *execution* remains DEPLOY-003 scope (not yet implemented)
 - Version comparison endpoint: read-only, admin-session-protected, no CSRF required (NFR-028 scopes CSRF to state-changing requests)
 - Repository upload endpoint: state-changing, admin-session **and** CSRF protected (NFR-028)
+- Deployment creation endpoint: state-changing, admin-session **and** CSRF protected (NFR-028), same pattern as repository upload/deactivation
 
 ### Database Standards
 - SQLAlchemy ORM only — no raw SQL
@@ -955,7 +1080,8 @@ Database Persistence
 | Module | Purpose |
 |--------|---------|
 | `backend/api/routers/agent.py` | Add new agent-facing endpoints (protected by `require_client_api_key`) |
-| `backend/repositories/repository_package_repository.py` | REP-002 will extend this further with read/list operations (browse, search) and FR-017 removal (status change to `INACTIVE`) |
+| `backend/api/routers/deployments.py` | DEPLOY-002 will add the client-facing polling endpoint here or on a new agent-facing router — not yet decided; DEPLOY-001's `POST /api/admin/deployments` must not be modified except for genuine integration needs |
+| `backend/repositories/deployment_repository.py` | DEPLOY-002/003/004 will extend this further with polling/status-update queries |
 | `backend/services/` | Add business logic for new features |
 | `backend/repositories/` | Extend with new data access methods |
 | `backend/models/` | Add new models only when necessary |
@@ -965,25 +1091,24 @@ Database Persistence
 
 ## Next Recommended Work
 
-### DEPLOY-001 — Deployment Creation
+### DEPLOY-002 — Agent Polling
 
-**Purpose:** Allow the System Administrator to create deployment jobs targeting one or more registered client computers (FR-008, FR-009), building on the now-complete repository catalog (REP-001 upload, REP-002 dashboard) and version comparison (INV-002).
+**Purpose:** Allow a Client Agent to poll the server for pending deployment jobs assigned to its Client ID (FR-009 Deployment Job Retrieval), building on the now-complete deployment batch/target persistence (DEPLOY-001).
 
 **Expected Deliverables (per Backlog):**
 
-- Deployment creation API (`POST` endpoint under `/api/admin`, session + CSRF protected, matching the existing administrator-endpoint pattern)
-- Target client selection (one or more registered, non-terminal-deployment clients per Business Rule 9, PRS §2.7)
-- A shared `batch_id` per multi-client deployment request, with one `DeploymentTarget`/deployment-job record created per targeted client (PRS FR-008)
-- Deployment job persistence (`Deployment`/`DeploymentTarget` models — already defined by CORE-002, unused until now)
-- Initial deployment status `Pending`
+- Polling endpoint (agent-facing, protected by the existing `require_client_api_key`, matching the router-level protection pattern already used by `backend/api/routers/agent.py`)
+- Job assignment — resolve the requesting client's own `Pending` `DeploymentTarget` (if any), scoped strictly to that authenticated client's id
+- Pending deployment retrieval — return enough information (repository package reference, silent install command, checksum) for the client to proceed to DEPLOY-003's download step
+- Status transition on retrieval (per FR-012 Deployment Status Reporting: the target should move out of `Pending` once meaningfully claimed by the client, though the exact transition point — on poll vs. on download-start — should be confirmed against FR-009's functional behavior wording before implementation)
 
 **Notes for Implementer:**
 
-- Reuse the existing `RepositoryPackageRepository`/`RepositoryService` (now including REP-002's `get_package`) to resolve and validate the selected package; a package must be `Approved` (not `Inactive`) to be deployable — REP-002's deactivation already guarantees `list_approved`/`get_active_conflict` exclude `Inactive` packages, so DEPLOY-001 should apply the same `Approved`-only constraint when accepting a deployment target package.
-- Reuse the existing `ClientRepository` to validate target clients exist and are registered.
-- Introduce a new `DeploymentRepository`/`DeploymentTargetRepository` and `DeploymentService`, following the same Repository → Service → Router layering as every other completed ticket — do not extend `RepositoryPackageRepository`/`RepositoryService` for deployment-specific logic, since `Deployment`/`DeploymentTarget` are distinct entities (PRS §7.5.4/§7.5.5).
-- Do **not** modify `RepositoryService`, `RepositoryPackageRepository`, or `VersionComparisonService` beyond what is strictly required to read an approved package for deployment targeting.
-- No scheduler or background services are required for job *creation* (DEPLOY-002 agent polling is a separate, later ticket).
+- Reuse `DeploymentRepository` (DEPLOY-001) for the underlying `DeploymentTarget` queries; extend it with a client-scoped "find my pending target" method rather than duplicating query logic.
+- Reuse the existing `require_client_api_key`/`CurrentClient` dependency (AUTH-002) for authentication — do not introduce a new client authentication mechanism.
+- A client should only ever see/retrieve its own deployment target(s), never another client's — enforce this by scoping every query to `CurrentClient.id`, mirroring the existing pattern in `backend/api/routers/agent.py`.
+- Do **not** implement installer download, checksum verification, or silent execution in this ticket — those belong to DEPLOY-003.
+- No scheduler or background services are required for polling (client-initiated polling only, per SAD §3.2/§4.6 "Client-Initiated Polling").
 
 ---
 
@@ -1003,8 +1128,9 @@ Database Persistence
 | Version Comparison | ✅ Production Ready |
 | Repository Management (Upload) | ✅ Production Ready (REP-001) |
 | Repository Dashboard (Listing/Search/Details/Removal) | ✅ Production Ready (REP-002) |
+| Deployment Creation | ✅ Production Ready (DEPLOY-001) |
 | Client Agent | ⚠ Agent scaffolding implemented (automatic registry scanning pending deployment) |
-| Deployment | ❌ Not yet implemented (DEPLOY-001 — current next ticket) |
+| Deployment Execution (polling/download/install/report) | ❌ Not yet implemented (DEPLOY-002 — current next ticket) |
 | Frontend Dashboard | ❌ Not yet implemented (all dashboard functionality is API-only so far) |
 
 ### Current Architecture (Summary)
@@ -1018,6 +1144,7 @@ Database Persistence
 - Version comparison against the approved repository catalog implemented, computed on demand (not persisted)
 - Repository package upload implemented: SHA-256 checksum computed at upload time, server-generated storage filenames, duplicate-entry rejection
 - Repository package dashboard implemented: administrator-facing list/search (by name/version, optional status filter), package detail retrieval, and deactivation (logical removal via `approval_status = INACTIVE`, not a physical delete)
+- Deployment creation implemented: administrator creates a batch (`Deployment`) + one `DeploymentTarget` per targeted client (initial status `Pending`), validated against package approval status, client existence, and the "one active deployment per client" business rule; fully atomic (all-or-nothing) and audit-logged
 - Client Agent scaffolding prepared for automated Windows Registry inventory collection
 
 ### Completed Modules (Do Not Redesign)
@@ -1032,43 +1159,48 @@ Database Persistence
 - INV-002: Version Comparison
 - REP-001: Repository Management (Upload)
 - REP-002: Repository Dashboard (Listing/Search/Details/Deactivation)
+- DEPLOY-001: Deployment Creation (batch + per-client target persistence)
 
 ### Current Blockers
 
 - No automated test framework (manual verification only)
 - No scheduler/background task infrastructure
-- No administrator dashboard **UI** for viewing uploaded inventory, repository packages, or comparison results (all such functionality is API-only so far — REP-002 added the repository-package API surface, but no Jinja2 templates are wired yet)
-- No deployment management module (DEPLOY-001 through DEPLOY-004 remain unimplemented)
-- No admin-facing "list clients" or "list inventory" endpoints yet (planned for a future dashboard-facing ticket)
+- No administrator dashboard **UI** for viewing uploaded inventory, repository packages, deployments, or comparison results (all such functionality is API-only so far — REP-002 added the repository-package API surface and DEPLOY-001 added the deployment-creation API surface, but no Jinja2 templates are wired yet)
+- No deployment *execution* module (DEPLOY-002 through DEPLOY-004 remain unimplemented) — every deployment target created by DEPLOY-001 stays `Pending` indefinitely until those tickets land
+- No admin-facing "list clients", "list inventory", or "list/history deployments" endpoints yet (planned for future dashboard-facing tickets)
 
 ### Immediate Next Task
 
-**DEPLOY-001 — Deployment Creation**
+**DEPLOY-002 — Agent Polling**
 
-- Implement deployment job creation targeting one or more registered clients (FR-008, FR-009)
-- Validate the selected repository package is `Approved` (reuse `RepositoryService.get_package`/`RepositoryPackageRepository`, do not duplicate this logic)
-- Validate target clients are registered and do not already have an active (non-terminal) deployment job (PRS Business Rule 9, §2.7)
-- Introduce a new `DeploymentRepository`/`DeploymentTargetRepository` and `DeploymentService`, following the established Repository → Service → Router architecture
-- Keep `RepositoryService`, `RepositoryPackageRepository`, and `VersionComparisonService` unmodified unless a defect is discovered
+- Implement a client-facing polling endpoint so a Client Agent can retrieve its own pending deployment target (FR-009 Deployment Job Retrieval)
+- Reuse the existing `require_client_api_key`/`CurrentClient` dependency (AUTH-002) — do not introduce a new client authentication mechanism
+- Extend `DeploymentRepository` (DEPLOY-001) with a client-scoped "find my pending target" query rather than duplicating query logic
+- Scope every query strictly to the authenticated client's own id — a client must never be able to retrieve another client's deployment target
+- Keep `DeploymentService.create_deployment` (DEPLOY-001), `RepositoryService`, `RepositoryPackageRepository`, and `VersionComparisonService` unmodified unless a defect is discovered
+- Installer download, checksum verification, and silent execution remain out of scope (DEPLOY-003)
 
 ### Files Likely to Be Modified
 
 | File | Reason |
 |------|--------|
-| `backend/api/routers/deployments.py` (new) | Deployment creation endpoint(s) |
-| `backend/repositories/deployment_repository.py` (new) | Deployment/DeploymentTarget data access |
-| `backend/services/deployment_service.py` (new) | DEPLOY-001 business logic (target validation, batch_id generation, job creation) |
-| `backend/schemas/deployment.py` (new) | Deployment creation request/response schemas |
-| `backend/api/dependencies.py` | Add a `DeploymentServiceDependency` provider, following the existing per-service DI factory pattern |
-| `backend/main.py` | Register the new deployment router |
+| `backend/api/routers/agent.py` or a new agent-facing deployment router | Client-facing polling endpoint |
+| `backend/repositories/deployment_repository.py` | Extend with a client-scoped pending-target lookup |
+| `backend/services/deployment_service.py` or a new polling-specific service method | DEPLOY-002 business logic (resolve + possibly transition the client's own pending target) |
+| `backend/schemas/deployment.py` | Extend with a polling response schema, or add a new schema module |
+| `backend/api/dependencies.py` | Add any new DI provider needed for polling, following the existing per-service DI factory pattern |
 
 ### Key Decision for REP-002 (Completed)
 
 Repository package listing/removal was implemented using the existing Repository → Service → Router architecture, extending `RepositoryPackageRepository` and `RepositoryService` (both introduced/extended by REP-001) rather than creating competing modules for the same table. `RepositoryService.upload_package` and `VersionComparisonService` were treated as stable, already-correct consumers/producers of `RepositoryPackageRepository` and were not modified — both the upload endpoint and the version-comparison endpoint continue to behave exactly as before REP-002.
 
-### Key Decision for DEPLOY-001 (Upcoming)
+### Key Decision for DEPLOY-001 (Completed)
 
-Introduce dedicated `Deployment`/`DeploymentTarget` repository and service modules rather than extending `RepositoryPackageRepository`/`RepositoryService` — deployment jobs are a distinct entity from repository packages (PRS §7.5.4/§7.5.5), and mixing deployment-creation logic into the repository-package service would blur the Single Responsibility boundary the project has maintained through every ticket so far (see SAD §10.14 Service Design Principles).
+Dedicated `Deployment`/`DeploymentTarget` repository (`DeploymentRepository`) and service (`DeploymentService`) modules were introduced rather than extending `RepositoryPackageRepository`/`RepositoryService` — deployment jobs are a distinct entity from repository packages (PRS §7.5.4/§7.5.5), and mixing deployment-creation logic into the repository-package service would have blurred the Single Responsibility boundary the project has maintained through every ticket so far (SAD §10.14 Service Design Principles). `DeploymentService` instead *composes* a `RepositoryService` instance to reuse `get_package` for package validation, and reuses the existing `ClientRepository` for client validation — reuse through composition, not inheritance or duplication. The "one active deployment per client" business rule (Business Rule 9, PRS §2.7) was deliberately kept out of the model layer and implemented entirely in `DeploymentService`, per the design note already present on `DeploymentTarget` since CORE-002.
+
+### Key Decision for DEPLOY-002 (Upcoming)
+
+Client-facing polling should reuse `DeploymentRepository` (extended, not replaced) and the existing `CurrentClient` authentication dependency. Whether the per-client `DeploymentTarget` status transitions on poll (e.g. `Pending` → `Downloading`) or only later at actual download-start (DEPLOY-003) should be resolved against FR-009's and FR-012's literal wording before implementation, since this ticket's own docstrings currently treat `Pending` as the sole "not yet retrieved" state.
 
 ---
 

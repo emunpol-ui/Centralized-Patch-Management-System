@@ -24,6 +24,7 @@ from backend.models.client import Client
 from backend.services.auth_service import AuthenticationError, AuthService
 from backend.services.client_auth_service import ClientAuthService
 from backend.services.client_service import ClientService
+from backend.services.deployment_service import DeploymentService
 from backend.services.heartbeat_service import HeartbeatService
 from backend.services.inventory_service import InventoryService
 from backend.services.repository_service import RepositoryService
@@ -133,6 +134,19 @@ def get_repository_service() -> RepositoryService:
 
 # Reusable, typed dependency: injects a configured `RepositoryService`.
 RepositoryServiceDependency = Annotated[RepositoryService, Depends(get_repository_service)]
+
+
+def get_deployment_service() -> DeploymentService:
+    """
+    Build a ``DeploymentService`` (DEPLOY-001 - FR-008/FR-009 deployment
+    creation business logic). Stateless, like every other service
+    constructed here.
+    """
+    return DeploymentService()
+
+
+# Reusable, typed dependency: injects a configured `DeploymentService`.
+DeploymentServiceDependency = Annotated[DeploymentService, Depends(get_deployment_service)]
 
 
 def require_administrator(
