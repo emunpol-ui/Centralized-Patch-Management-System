@@ -184,3 +184,36 @@ class DeploymentRepository:
             .limit(1)
         )
         return db.execute(stmt).scalars().first()
+
+    def get_target_for_client(
+        self, db: Session, *, target_id: uuid.UUID, client_id: uuid.UUID
+    ) -> Optional[DeploymentTarget]:
+        """
+        Return the ``DeploymentTarget`` identified by ``target_id`` only if
+        it belongs to ``client_id``, or ``None`` otherwise - including when
+        ``target_id`` does not exist at all.
+
+        Introduced by DEPLOY-003 (FR-010 Installer Download). The
+        ``client_id`` filter is applied inside the SQL ``WHERE`` clause
+        itself, mirroring ``get_pending_target_for_client`` (DEPLOY-002),
+        so a client can never resolve - and therefore never download the
+        installer for - another client's deployment target, even by
+        guessing/enumerating target ids. The caller (``DeploymentService.
+        prepare_installer_download``) MUST always pass the identity
+        resolved from the authenticated API key (``CurrentClient.id``),
+        never a client id taken from request input (this ticket's "Client
+        Isolation" requirement).
+
+        Unlike ``get_pending_target_for_client``, this lookup is not
+        restricted to ``Pending`` status - a target already in
+        ``Downloading`` (e.g. a client retrying an interrupted download)
+        must still resolve here; the decision about *which* statuses are
+        actually downloadable is a business rule and belongs to
+        ``DeploymentService``, not this repository.
+        """
+        stmt = (
+            select(DeploymentTarget)
+            .where(DeploymentTarget.id == target_id)
+            .where(DeploymentTarget.client_id == client_id)
+        )
+        return db.execute(stmt).scalars().first()

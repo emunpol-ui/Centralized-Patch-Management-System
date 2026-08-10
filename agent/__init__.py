@@ -15,4 +15,21 @@ with a Client Agent-side deliverable:
     * ``agent.config`` - Client Agent configuration (server URL, API key).
 
 Run as ``python -m agent.main`` from the project root.
+
+--------------------------------------------------------------------------
+DEPLOY-003 ADDITION
+
+Two further packages implement installer download and silent installation
+(FR-010, FR-011):
+    * ``agent.communication.deployment_client`` - authenticated HTTP calls
+      to poll for a pending deployment (FR-009, reused from DEPLOY-002's
+      server-side endpoint) and download its installer (FR-010).
+    * ``agent.installer`` - SHA-256 checksum verification and direct
+      (non-shell) silent installer process execution (FR-011).
+    * ``agent.deployment`` - orchestrates the full poll -> download ->
+      verify -> execute cycle. Run as ``python -m agent.deployment.manager``.
+
+Deployment status reporting (FR-012) back to the server remains out of
+scope for this package until DEPLOY-004 is implemented.
+--------------------------------------------------------------------------
 """

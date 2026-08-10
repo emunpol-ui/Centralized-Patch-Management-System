@@ -40,6 +40,24 @@ class AgentSettings:
     api_key: str
     request_timeout_seconds: float
 
+    # --- DEPLOY-003 additions (FR-010/FR-011) -----------------------------
+    # Installer download HTTP timeout is kept separate from
+    # `request_timeout_seconds` (used for the small, fast JSON calls -
+    # registration, heartbeat, inventory, polling) since installer files
+    # can be substantially larger and slower to transfer.
+    download_timeout_seconds: float
+    # Number of installer *download* attempts before giving up (FR-010
+    # Error Conditions: "The Client Agent shall retry the download
+    # according to the configured retry policy"). Deliberately does NOT
+    # apply to a checksum mismatch (FR-011) - that is a definitive
+    # integrity failure, never retried.
+    download_max_retries: int
+    download_retry_delay_seconds: float
+    # Ceiling on how long a single silent installation may run before
+    # being forcibly terminated and reported as failed (FR-011 Error
+    # Conditions: "Installation times out").
+    installer_execution_timeout_seconds: float
+
 
 def get_agent_settings() -> AgentSettings:
     """
@@ -54,4 +72,10 @@ def get_agent_settings() -> AgentSettings:
         server_url=os.getenv("AGENT_SERVER_URL", "http://localhost:8000").strip(),
         api_key=os.getenv("AGENT_API_KEY", "").strip(),
         request_timeout_seconds=float(os.getenv("AGENT_REQUEST_TIMEOUT_SECONDS", "30")),
+        download_timeout_seconds=float(os.getenv("AGENT_DOWNLOAD_TIMEOUT_SECONDS", "120")),
+        download_max_retries=int(os.getenv("AGENT_DOWNLOAD_MAX_RETRIES", "3")),
+        download_retry_delay_seconds=float(os.getenv("AGENT_DOWNLOAD_RETRY_DELAY_SECONDS", "5")),
+        installer_execution_timeout_seconds=float(
+            os.getenv("AGENT_INSTALLER_EXECUTION_TIMEOUT_SECONDS", "600")
+        ),
     )

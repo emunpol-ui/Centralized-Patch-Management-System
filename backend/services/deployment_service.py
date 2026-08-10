@@ -49,7 +49,8 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import List
+from pathlib import Path
+from typing import List, Tuple
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -65,6 +66,19 @@ from backend.repositories.deployment_repository import DeploymentRepository
 from backend.services.repository_service import RepositoryPackageNotFoundError, RepositoryService
 
 logger = logging.getLogger(__name__)
+
+# Per-client target states from which an installer download may still be
+# requested (DEPLOY-003, FR-010). ``Pending`` covers the normal first
+# download; ``Downloading`` covers a Client Agent retrying an interrupted
+# download of the same target. Terminal states (``Completed``, ``Failed``,
+# ``Cancelled``) and ``Installing`` (the download has already finished) are
+# deliberately excluded - a request against one of those indicates the
+# Client Agent is out of sync with the server's view of the deployment, not
+# a legitimate retry.
+DOWNLOADABLE_STATUSES: tuple[DeploymentStatus, ...] = (
+    DeploymentStatus.PENDING,
+    DeploymentStatus.DOWNLOADING,
+)
 
 
 class DeploymentPackageUnavailableError(AppException):
@@ -109,6 +123,59 @@ class DeploymentClientActiveError(AppException):
         super().__init__(
             f"The following client(s) already have an active deployment in progress: {formatted}.",
             status_code=409,
+        )
+
+
+class DeploymentTargetNotFoundError(AppException):
+    """
+    Raised when a requested deployment target id does not exist, or does
+    not belong to the client requesting it (DEPLOY-003, FR-010).
+
+    Deliberately raised identically for "does not exist at all" and
+    "exists but belongs to a different client" - the two cases are
+    indistinguishable to the requester by design (this ticket's "Client
+    Isolation" requirement: a client must never learn anything about the
+    existence of another client's deployment targets, not even via a
+    different error message/status code).
+    """
+
+    def __init__(self, target_id: UUID) -> None:
+        super().__init__(
+            f"Deployment target '{target_id}' was not found for the authenticated client.",
+            status_code=404,
+        )
+
+
+class DeploymentTargetNotDownloadableError(AppException):
+    """
+    Raised when a deployment target exists and belongs to the requesting
+    client, but its current status is not one from which an installer
+    download may be requested (see ``DOWNLOADABLE_STATUSES``).
+    """
+
+    def __init__(self, target_id: UUID, current_status: DeploymentStatus) -> None:
+        super().__init__(
+            f"Deployment target '{target_id}' is not available for download "
+            f"(current status: {current_status.value}).",
+            status_code=409,
+        )
+
+
+class DeploymentInstallerUnavailableError(AppException):
+    """
+    Raised when a deployment target's associated repository package
+    record exists, but its installer file cannot be located on disk under
+    the configured repository directory.
+
+    This represents a server-side data-integrity problem (a
+    ``RepositoryPackage`` row with no corresponding file), not a fault of
+    the requesting Client Agent - reported as a 500 rather than a 404/409.
+    """
+
+    def __init__(self, package_id: UUID) -> None:
+        super().__init__(
+            f"Installer file for repository package '{package_id}' could not be located on the server.",
+            status_code=500,
         )
 
 
@@ -341,11 +408,154 @@ class DeploymentService:
             )
         return target
 
+    def prepare_installer_download(
+        self,
+        db: Session,
+        *,
+        client: Client,
+        target_id: UUID,
+        repository_dir: Path,
+    ) -> Tuple[DeploymentTarget, Path]:
+        """
+        Resolve and authorize a Client Agent's request to download the
+        installer for one of its own deployment targets (DEPLOY-003,
+        FR-010 Installer Download).
+
+        ``client`` MUST be the ``Client`` already authenticated by
+        ``require_client_api_key`` (AUTH-002) - see
+        ``backend/api/routers/agent.py``'s ``download_installer`` handler,
+        which passes ``current_client`` (never a client id read from
+        request input). Resolution is delegated to
+        ``DeploymentRepository.get_target_for_client``, which filters
+        strictly on ``client.id`` at the database layer, mirroring
+        ``poll_pending_deployment``'s existing client-isolation approach
+        (DEPLOY-002) - this is what guarantees a client can never download
+        another client's installer, even by guessing/enumerating target
+        ids (this ticket's "Client Isolation" requirement).
+
+        Validation order:
+
+            1. The target must exist and belong to ``client``
+               (``DeploymentTargetNotFoundError``, 404 - identical for
+               "does not exist" and "belongs to someone else", per that
+               exception's own docstring).
+            2. The target's status must be one from which a download may
+               be requested (``DOWNLOADABLE_STATUSES`` -
+               ``DeploymentTargetNotDownloadableError``, 409).
+            3. The associated repository package's installer file must
+               actually be present on disk under ``repository_dir``
+               (``DeploymentInstallerUnavailableError``, 500).
+
+        Every successful and rejected-for-isolation-reasons attempt is
+        recorded in the audit log (PRS FR-016 Logged Events explicitly
+        lists "Installer Downloads"), each followed by ``db.commit()`` so
+        the entry is actually persisted before this read-only endpoint
+        returns its (non-JSON, streamed) response.
+
+        Returns the resolved ``DeploymentTarget`` and the absolute
+        filesystem ``Path`` to its installer file - the caller (the
+        FastAPI router) is responsible for actually streaming that file
+        back to the client (e.g. via ``fastapi.responses.FileResponse``);
+        this service performs no I/O beyond the existence check.
+
+        Raises:
+            ``DeploymentTargetNotFoundError`` (404) - no target with
+            ``target_id`` exists for this client.
+
+            ``DeploymentTargetNotDownloadableError`` (409) - the target
+            exists but is not currently downloadable (e.g. already
+            ``Completed``/``Failed``/``Cancelled``, or still
+            ``Installing``).
+
+            ``DeploymentInstallerUnavailableError`` (500) - the target's
+            repository package has no corresponding installer file on
+            disk.
+        """
+        target = self._deployments.get_target_for_client(db, target_id=target_id, client_id=client.id)
+        if target is None:
+            self._audit_logs.create(
+                db,
+                event_type="INSTALLER_DOWNLOAD_REJECTED",
+                severity=AuditSeverity.WARNING,
+                description=(
+                    f"Client {client.id} requested installer download for deployment target "
+                    f"'{target_id}', which does not exist or does not belong to this client."
+                ),
+                client_id=client.id,
+            )
+            db.commit()
+            logger.warning(
+                "Client %s requested installer download for unknown/foreign deployment target %s.",
+                client.id,
+                target_id,
+            )
+            raise DeploymentTargetNotFoundError(target_id)
+
+        if target.status not in DOWNLOADABLE_STATUSES:
+            logger.info(
+                "Client %s requested installer download for target %s, but its status is %s "
+                "(not currently downloadable).",
+                client.id,
+                target.id,
+                target.status.value,
+            )
+            raise DeploymentTargetNotDownloadableError(target_id, target.status)
+
+        package = target.deployment.repository_package
+        installer_path = repository_dir / package.installer_filename
+
+        if not installer_path.is_file():
+            self._audit_logs.create(
+                db,
+                event_type="INSTALLER_FILE_MISSING",
+                severity=AuditSeverity.ERROR,
+                description=(
+                    f"Installer file '{package.installer_filename}' for repository package "
+                    f"{package.id} (deployment target {target.id}, client {client.id}) is missing "
+                    f"from the repository directory."
+                ),
+                client_id=client.id,
+            )
+            db.commit()
+            logger.error(
+                "Installer file %s for package %s missing on disk (target=%s, client=%s).",
+                installer_path,
+                package.id,
+                target.id,
+                client.id,
+            )
+            raise DeploymentInstallerUnavailableError(package.id)
+
+        self._audit_logs.create(
+            db,
+            event_type="INSTALLER_DOWNLOAD",
+            severity=AuditSeverity.INFO,
+            description=(
+                f"Client {client.id} downloaded installer for deployment target {target.id} "
+                f"(deployment={target.deployment_id}, package={package.id} "
+                f"'{package.software_name}' v'{package.version}')."
+            ),
+            client_id=client.id,
+        )
+        db.commit()
+
+        logger.info(
+            "Client %s downloading installer for target %s (package=%s, file=%s).",
+            client.id,
+            target.id,
+            package.id,
+            package.installer_filename,
+        )
+        return target, installer_path
+
 
 __all__ = [
     "DeploymentService",
     "DeploymentPackageUnavailableError",
     "DeploymentClientNotFoundError",
     "DeploymentClientActiveError",
+    "DeploymentTargetNotFoundError",
+    "DeploymentTargetNotDownloadableError",
+    "DeploymentInstallerUnavailableError",
     "RepositoryPackageNotFoundError",
 ]
