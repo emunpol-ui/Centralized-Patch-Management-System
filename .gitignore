@@ -14,3 +14,6 @@ repository/**
 .idea/
 .DS_Store
 Thumbs.db
+
+# Client Agent DEPLOY-004 runtime status-report queue
+agent/deployment/pending_status_reports.json

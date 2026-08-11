@@ -58,6 +58,18 @@ class AgentSettings:
     # Conditions: "Installation times out").
     installer_execution_timeout_seconds: float
 
+    # --- DEPLOY-004 additions (FR-012) -------------------------------------
+    # Reuses the same retry-policy shape already established for installer
+    # downloads (`download_max_retries`/`download_retry_delay_seconds`
+    # above) for deployment status reports: a status report is a small,
+    # fast JSON call, so communication failures are treated as transient
+    # and retried within the same deployment cycle (PRS NFR-004 / FR-012
+    # Error Conditions: "If reporting fails, the Client Agent shall retain
+    # the report and retry transmission during the next communication
+    # cycle"). See `agent.deployment.manager._report_status_with_retries`.
+    status_report_max_retries: int
+    status_report_retry_delay_seconds: float
+
 
 def get_agent_settings() -> AgentSettings:
     """
@@ -77,5 +89,9 @@ def get_agent_settings() -> AgentSettings:
         download_retry_delay_seconds=float(os.getenv("AGENT_DOWNLOAD_RETRY_DELAY_SECONDS", "5")),
         installer_execution_timeout_seconds=float(
             os.getenv("AGENT_INSTALLER_EXECUTION_TIMEOUT_SECONDS", "600")
+        ),
+        status_report_max_retries=int(os.getenv("AGENT_STATUS_REPORT_MAX_RETRIES", "3")),
+        status_report_retry_delay_seconds=float(
+            os.getenv("AGENT_STATUS_REPORT_RETRY_DELAY_SECONDS", "5")
         ),
     )

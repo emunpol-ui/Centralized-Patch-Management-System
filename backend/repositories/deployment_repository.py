@@ -29,6 +29,7 @@ Layer in DEPLOY-001... at the data layer it is supported by the
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from typing import Iterable, List, Optional
 
 from sqlalchemy import select
@@ -217,3 +218,57 @@ class DeploymentRepository:
             .where(DeploymentTarget.client_id == client_id)
         )
         return db.execute(stmt).scalars().first()
+
+    def get_target_by_id(self, db: Session, target_id: uuid.UUID) -> Optional[DeploymentTarget]:
+        """
+        Return the ``DeploymentTarget`` with the given primary key, or
+        ``None`` - with no client-scoping filter applied.
+
+        Introduced by DEPLOY-004 for the administrator-facing cancellation
+        endpoint (FR-021), which is authorized by administrator session
+        (``CurrentAdministrator``), not by client identity - unlike
+        ``get_target_for_client`` (DEPLOY-003), which deliberately DOES
+        filter on ``client_id`` for Client Agent-facing operations. This
+        method must never be used to satisfy a Client Agent-facing
+        request, since it performs no client-ownership check at all.
+        """
+        return db.get(DeploymentTarget, target_id)
+
+    def update_status(
+        self,
+        db: Session,
+        target: DeploymentTarget,
+        *,
+        status: DeploymentStatus,
+        exit_code: Optional[int] = None,
+        error_message: Optional[str] = None,
+        completion_time: Optional[datetime] = None,
+    ) -> DeploymentTarget:
+        """
+        Mutate an already-resolved ``DeploymentTarget`` in place and flush
+        the change.
+
+        Introduced by DEPLOY-004 (FR-012 Deployment Status Reporting,
+        FR-021 Deployment Cancellation). Pure data mutation only - which
+        status transitions are legal, whether ``error_message`` is
+        required, and when ``completion_time`` should be set are business
+        rules decided by ``backend.services.deployment_service.
+        DeploymentService`` before this method is ever called; this
+        repository does not second-guess the caller's decision.
+
+        ``exit_code``/``error_message``/``completion_time`` are only
+        written when explicitly provided (not ``None``) so that an
+        intermediate progress update (e.g. reporting ``Downloading`` or
+        ``Installing``, neither of which carries a completion time) does
+        not inadvertently clear a value that has not actually changed.
+        """
+        target.status = status
+        if exit_code is not None:
+            target.exit_code = exit_code
+        if error_message is not None:
+            target.error_message = error_message
+        if completion_time is not None:
+            target.completion_time = completion_time
+        db.add(target)
+        db.flush()
+        return target

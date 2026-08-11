@@ -19,7 +19,7 @@ from datetime import datetime
 from typing import List, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from backend.models.enums import DeploymentStatus, InstallerType
 
@@ -208,3 +208,129 @@ class DeploymentPollResponse(BaseModel):
     deployment: Optional[DeploymentPollTargetResponse] = Field(
         default=None, description="The pending deployment's details, or null if none exists."
     )
+
+
+# --------------------------------------------------------------------------
+# DEPLOY-004 ADDITION - Client Agent deployment status reporting (FR-012)
+#
+# Shapes the request/response of the new agent-facing
+# ``POST /api/agent/deployments/{target_id}/status`` endpoint (see
+# ``backend/api/routers/agent.py``). ``target_id`` itself travels as a URL
+# path parameter (mirroring DEPLOY-003's
+# ``GET /deployments/{target_id}/download``) rather than as a request body
+# field, so the same "authenticated client + path target_id, never a
+# body-supplied client id" Client Isolation pattern already established by
+# DEPLOY-002/DEPLOY-003 continues to hold here without introducing a new
+# authorization shape.
+#
+# Only the per-client progress/result fields FR-012 actually describes are
+# accepted: the requested ``status``, an optional installer ``exit_code``,
+# and an optional ``error_message`` for failed outcomes. Every one of
+# these already has a corresponding column on
+# ``backend.models.deployment_target.DeploymentTarget`` (``status``,
+# ``exit_code``, ``error_message``, ``completion_time``) - no new database
+# column was required (see ``backend/services/deployment_service.py``'s
+# ``report_status`` docstring for how ``completion_time`` is set
+# server-side rather than accepted from the client).
+# --------------------------------------------------------------------------
+
+# Statuses a Client Agent is permitted to report. ``Pending`` is the
+# server-assigned initial state and ``Cancelled`` is an administrator-only
+# outcome (FR-021) - neither may be reported by a Client Agent.
+_CLIENT_REPORTABLE_STATUSES: frozenset[DeploymentStatus] = frozenset(
+    {
+        DeploymentStatus.DOWNLOADING,
+        DeploymentStatus.INSTALLING,
+        DeploymentStatus.COMPLETED,
+        DeploymentStatus.FAILED,
+    }
+)
+
+
+class DeploymentStatusReportRequest(BaseModel):
+    """
+    Client Agent request body for reporting deployment progress or a
+    final result for one of its own deployment targets (FR-012 Deployment
+    Status Reporting).
+
+    ``status`` must be one of ``Downloading``, ``Installing``,
+    ``Completed``, or ``Failed`` - the Service Layer additionally enforces
+    that the requested status is a legal transition from the target's
+    *current* status (e.g. ``Completed`` -> ``Installing`` is rejected
+    regardless of what this schema allows); see
+    ``backend.services.deployment_service.DeploymentService.report_status``.
+
+    ``exit_code`` is the installer process exit code (FR-011/FR-012),
+    typically supplied when reporting ``Completed`` or ``Failed``.
+    ``error_message`` describes what went wrong for a ``Failed`` report
+    (e.g. download failure, checksum failure, installer launch failure,
+    timeout, non-zero exit code) and is required when ``status`` is
+    ``Failed`` (PRS FR-012 Error Conditions: "Required information is
+    missing").
+    """
+
+    status: DeploymentStatus = Field(..., description="The deployment stage or outcome being reported.")
+    exit_code: Optional[int] = Field(
+        default=None, description="Installer process exit code, if available."
+    )
+    error_message: Optional[str] = Field(
+        default=None,
+        max_length=4000,
+        description="Failure details. Required when status is 'Failed'.",
+    )
+
+    @field_validator("status")
+    @classmethod
+    def status_must_be_client_reportable(cls, value: DeploymentStatus) -> DeploymentStatus:
+        """Reject ``Pending``/``Cancelled`` - a Client Agent may never report either."""
+        if value not in _CLIENT_REPORTABLE_STATUSES:
+            allowed = ", ".join(sorted(status.value for status in _CLIENT_REPORTABLE_STATUSES))
+            raise ValueError(f"status must be one of: {allowed}")
+        return value
+
+    @model_validator(mode="after")
+    def failed_requires_error_message(self) -> "DeploymentStatusReportRequest":
+        """Require a non-blank ``error_message`` whenever ``status`` is ``Failed``."""
+        if self.status == DeploymentStatus.FAILED and not (self.error_message and self.error_message.strip()):
+            raise ValueError("error_message is required when reporting status 'Failed'")
+        return self
+
+
+class DeploymentTargetStatusResponse(BaseModel):
+    """
+    Response body confirming a recorded deployment status report
+    (FR-012 Outputs: "Deployment Update - Stored deployment result").
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    target_id: UUID = Field(..., description="This client's deployment target identifier.")
+    deployment_id: UUID = Field(..., description="Deployment batch identifier (PRS 'Batch ID').")
+    status: DeploymentStatus = Field(..., description="The deployment target's current status.")
+    completion_time: Optional[datetime] = Field(
+        default=None, description="Server-recorded completion timestamp (set for Completed/Failed only)."
+    )
+    exit_code: Optional[int] = Field(default=None, description="Installer process exit code, if recorded.")
+    error_message: Optional[str] = Field(default=None, description="Failure details, if recorded.")
+
+
+# --------------------------------------------------------------------------
+# DEPLOY-004 ADDITION - Administrator deployment cancellation (FR-021)
+#
+# Shapes the response of the new administrator-facing
+# ``POST /api/admin/deployments/{target_id}/cancel`` endpoint (see
+# ``backend/api/routers/deployments.py``). No request body is required -
+# the target to cancel is fully identified by the ``target_id`` path
+# parameter, consistent with ``POST /api/admin/keys``'s existing
+# "trigger-only" request shape.
+# --------------------------------------------------------------------------
+
+
+class DeploymentCancelResponse(BaseModel):
+    """Response body confirming a deployment target was cancelled (FR-021)."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    target_id: UUID = Field(..., description="The cancelled deployment target's identifier.")
+    deployment_id: UUID = Field(..., description="Deployment batch identifier (PRS 'Batch ID').")
+    status: DeploymentStatus = Field(..., description="The deployment target's status after cancellation.")

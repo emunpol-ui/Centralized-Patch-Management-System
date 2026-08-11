@@ -118,6 +118,37 @@ already returned by DEPLOY-002's polling response - this endpoint's only
 job is to transmit the installer bytes. Deployment status reporting
 (FR-012) remains out of scope (DEPLOY-004).
 --------------------------------------------------------------------------
+
+--------------------------------------------------------------------------
+DEPLOY-004 ADDITION - ``POST /deployments/{target_id}/status``
+
+Implements FR-012 Deployment Status Reporting. PRS Appendix B documents
+this endpoint's path as ``/api/deployment/status`` (no path parameter);
+consistent with the path convention this router already established for
+``/api/agent/deployments/poll`` (DEPLOY-002) and
+``/api/agent/deployments/{target_id}/download`` (DEPLOY-003) -
+centralizing every authenticated, already-registered-client endpoint
+under this router's ``/api/agent`` prefix, and identifying the target
+deployment via the same ``target_id`` path parameter DEPLOY-003 already
+introduced - it is added here as
+``/api/agent/deployments/{target_id}/status`` rather than as a literal,
+separate ``/api/deployment/status`` route.
+
+As with polling and download, the authenticated ``current_client`` (never
+a client id read from the request) is the sole source of the
+authorization identity - see
+``backend.services.deployment_service.DeploymentService.report_status``
+and ``backend.repositories.deployment_repository.DeploymentRepository.
+get_target_for_client`` for where that scoping is actually enforced.
+This handler only authenticates, delegates, and shapes the response - all
+status-transition validation, ``completion_time``/exit-code/error-message
+persistence, and audit logging happen inside ``DeploymentService.
+report_status``.
+
+Deployment cancellation (FR-021) is an administrator-facing operation and
+therefore lives on ``backend/api/routers/deployments.py``, not here - a
+Client Agent has no ability to cancel its own deployment.
+--------------------------------------------------------------------------
 """
 
 from __future__ import annotations
@@ -142,6 +173,8 @@ from backend.schemas.deployment import (
     DeploymentPollPackageDetail,
     DeploymentPollResponse,
     DeploymentPollTargetResponse,
+    DeploymentStatusReportRequest,
+    DeploymentTargetStatusResponse,
 )
 from backend.schemas.heartbeat import HeartbeatRequest
 from backend.schemas.inventory import InventoryUploadRequest
@@ -375,3 +408,63 @@ async def download_installer(
         media_type="application/octet-stream",
         filename=installer_path.name,
     )
+
+
+@router.post(
+    "/deployments/{target_id}/status",
+    status_code=status.HTTP_200_OK,
+    summary="Report deployment progress or a final result",
+    description=(
+        "Report a status transition for one of the authenticated Client Agent's own deployment "
+        "targets (FR-012): 'Downloading' when installer download begins, 'Installing' when silent "
+        "installation begins, and 'Completed'/'Failed' for the final outcome. Scoped strictly to the "
+        "authenticated client - a client can never report status for another client's deployment. "
+        "Only legal forward transitions from the target's current status are accepted; terminal "
+        "outcomes (Completed/Failed/Cancelled) can never be overwritten."
+    ),
+)
+async def report_deployment_status(
+    target_id: UUID,
+    current_client: CurrentClient,
+    db: DBSessionDependency,
+    deployment_service: DeploymentServiceDependency,
+    payload: DeploymentStatusReportRequest,
+) -> Dict[str, Any]:
+    """
+    Record a status transition reported by the authenticated Client Agent
+    (FR-012 Deployment Status Reporting).
+
+    ``current_client`` - resolved and authenticated by
+    ``require_client_api_key`` before this handler body runs - is the
+    *only* source of the authorization identity passed to
+    ``DeploymentService.report_status``; ``target_id`` alone (a value the
+    requesting client supplies) is never trusted as an authorization
+    boundary by itself, mirroring DEPLOY-002/DEPLOY-003's existing Client
+    Isolation pattern. ``payload`` is validated by Pydantic
+    (``DeploymentStatusReportRequest`` - only client-reportable statuses,
+    ``error_message`` required for ``Failed``) before this handler is even
+    invoked; the Service Layer re-validates the same rules plus the
+    target's current-status transition legality, since it is this
+    project's authoritative validation boundary.
+    """
+    updated = deployment_service.report_status(
+        db,
+        client=current_client,
+        target_id=target_id,
+        status=payload.status,
+        exit_code=payload.exit_code,
+        error_message=payload.error_message,
+    )
+    response = DeploymentTargetStatusResponse(
+        target_id=updated.id,
+        deployment_id=updated.deployment_id,
+        status=updated.status,
+        completion_time=updated.completion_time,
+        exit_code=updated.exit_code,
+        error_message=updated.error_message,
+    )
+    return {
+        "success": True,
+        "message": "Deployment status recorded.",
+        "data": response.model_dump(mode="json"),
+    }

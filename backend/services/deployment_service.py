@@ -49,8 +49,9 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 from uuid import UUID
 
 from sqlalchemy.orm import Session
@@ -79,6 +80,39 @@ DOWNLOADABLE_STATUSES: tuple[DeploymentStatus, ...] = (
     DeploymentStatus.PENDING,
     DeploymentStatus.DOWNLOADING,
 )
+
+# --------------------------------------------------------------------------
+# DEPLOY-004 ADDITIONS - status reporting (FR-012) / cancellation (FR-021)
+# --------------------------------------------------------------------------
+
+# Terminal per-client statuses: once a ``DeploymentTarget`` reaches one of
+# these, it must never be transitioned again (PRS FR-012 Deployment Status
+# Values; this ticket's explicit "terminal states must not be casually
+# overwritten" requirement - e.g. ``Completed`` -> ``Installing`` or
+# ``Failed`` -> ``Downloading`` must never be accepted).
+TERMINAL_DEPLOYMENT_STATUSES: tuple[DeploymentStatus, ...] = (
+    DeploymentStatus.COMPLETED,
+    DeploymentStatus.FAILED,
+    DeploymentStatus.CANCELLED,
+)
+
+# The deployment lifecycle's legal forward transitions, keyed by the
+# target's *current* status (PRS FR-012: Pending -> Downloading ->
+# Installing -> Completed/Failed). ``Downloading`` and ``Installing`` may
+# each also transition directly to ``Failed`` (e.g. a download or checksum
+# failure occurring before installation ever begins - see
+# ``agent.deployment.manager.ChecksumMismatchError``, which is reported as
+# ``Failed`` without an intervening ``Installing`` report) - this is a
+# deliberate, documented extension of the ticket's minimum "at least
+# consider Pending -> Downloading, Downloading -> Installing, Installing ->
+# Completed, Installing -> Failed" transition set, since the Client Agent
+# genuinely can fail during the download/verification stage, before
+# installation is ever attempted.
+STATUS_TRANSITIONS: dict[DeploymentStatus, frozenset[DeploymentStatus]] = {
+    DeploymentStatus.PENDING: frozenset({DeploymentStatus.DOWNLOADING, DeploymentStatus.FAILED}),
+    DeploymentStatus.DOWNLOADING: frozenset({DeploymentStatus.INSTALLING, DeploymentStatus.FAILED}),
+    DeploymentStatus.INSTALLING: frozenset({DeploymentStatus.COMPLETED, DeploymentStatus.FAILED}),
+}
 
 
 class DeploymentPackageUnavailableError(AppException):
@@ -176,6 +210,83 @@ class DeploymentInstallerUnavailableError(AppException):
         super().__init__(
             f"Installer file for repository package '{package_id}' could not be located on the server.",
             status_code=500,
+        )
+
+
+class DeploymentStatusTransitionError(AppException):
+    """
+    Raised when a Client Agent's reported ``status`` is not a legal
+    transition from a deployment target's current status (FR-012).
+
+    Covers both "not a recognized forward transition" (e.g. ``Pending`` ->
+    ``Installing``, skipping ``Downloading``) and "the target is already in
+    a terminal state" (e.g. ``Completed`` -> ``Installing``, ``Failed`` ->
+    ``Downloading``, ``Cancelled`` -> ``Installing``) - this ticket's
+    explicit requirement that terminal states must not be casually
+    overwritten.
+    """
+
+    def __init__(
+        self, target_id: UUID, current_status: DeploymentStatus, requested_status: DeploymentStatus
+    ) -> None:
+        super().__init__(
+            f"Deployment target '{target_id}' cannot transition from "
+            f"'{current_status.value}' to '{requested_status.value}'.",
+            status_code=409,
+        )
+
+
+class DeploymentStatusReportValidationError(AppException):
+    """
+    Raised when a status report is otherwise a legal transition but is
+    missing information FR-012 requires for that particular outcome (e.g.
+    reporting ``Failed`` with no ``error_message``).
+
+    This duplicates part of what ``backend.schemas.deployment.
+    DeploymentStatusReportRequest`` already validates at the schema layer;
+    it is kept here as well since the Service Layer is this project's
+    authoritative validation boundary and must not assume every caller
+    goes through the schema layer (mirroring
+    ``DeploymentService._validate_clients``'s existing "de-duplicated
+    again defensively" rationale).
+    """
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, status_code=400)
+
+
+class DeploymentCancellationTargetNotFoundError(AppException):
+    """
+    Raised when an administrator attempts to cancel a deployment target
+    id that does not exist (FR-021).
+
+    Deliberately a distinct exception from ``DeploymentTargetNotFoundError``
+    above: that one is raised for Client Agent-facing, client-scoped
+    lookups (and is intentionally worded to be indistinguishable from "this
+    target belongs to someone else"), whereas this one is raised for an
+    administrator-facing, unscoped lookup, where no such ambiguity is
+    necessary or desirable - an administrator is authorized to know a
+    target id simply does not exist.
+    """
+
+    def __init__(self, target_id: UUID) -> None:
+        super().__init__(f"Deployment target '{target_id}' was not found.", status_code=404)
+
+
+class DeploymentCancellationNotAllowedError(AppException):
+    """
+    Raised when an administrator attempts to cancel a deployment target
+    that is not currently ``Pending`` (FR-021: "Once a Client Agent has
+    retrieved a deployment job through polling (FR-009), the job shall no
+    longer be eligible for cancellation... If the job is no longer
+    Pending, the server rejects the cancellation request").
+    """
+
+    def __init__(self, target_id: UUID, current_status: DeploymentStatus) -> None:
+        super().__init__(
+            f"Deployment target '{target_id}' is no longer Pending (current status: "
+            f"{current_status.value}) and cannot be cancelled.",
+            status_code=409,
         )
 
 
@@ -548,6 +659,229 @@ class DeploymentService:
         )
         return target, installer_path
 
+    def report_status(
+        self,
+        db: Session,
+        *,
+        client: Client,
+        target_id: UUID,
+        status: DeploymentStatus,
+        exit_code: Optional[int] = None,
+        error_message: Optional[str] = None,
+    ) -> DeploymentTarget:
+        """
+        Record a Client Agent-reported status transition for one of its
+        own deployment targets (DEPLOY-004, FR-012 Deployment Status
+        Reporting).
+
+        ``client`` MUST be the ``Client`` already authenticated by
+        ``require_client_api_key`` (AUTH-002) - see
+        ``backend/api/routers/agent.py``'s ``report_deployment_status``
+        handler, which passes ``current_client`` (never a client id read
+        from request input). Resolution is delegated to
+        ``DeploymentRepository.get_target_for_client``, the exact same
+        client-scoped lookup already used by
+        ``prepare_installer_download`` (DEPLOY-003) and
+        ``poll_pending_deployment`` (DEPLOY-002) - this is what guarantees
+        a client can never report status for, and therefore never mutate,
+        another client's deployment target (this ticket's "Client
+        Isolation" requirement).
+
+        --------------------------------------------------------------------
+        DESIGN NOTE - idempotent re-reporting
+
+        If ``status`` already equals the target's current status, this is
+        treated as a harmless, idempotent no-op (the target is returned
+        unchanged, without a new audit log entry) rather than an invalid
+        transition. This supports the PRS's client communication retry
+        requirement (NFR-004 / FR-012 Error Conditions: "If reporting
+        fails, the Client Agent shall retain the report and retry
+        transmission during the next communication cycle") - if the
+        server successfully processed a report but the Client Agent never
+        saw the HTTP response (e.g. the connection dropped after the
+        server committed), the Agent's retry of the *same* report must
+        not be rejected as "already in a terminal state."
+        --------------------------------------------------------------------
+
+        Validation order:
+
+            1. The target must exist and belong to ``client``
+               (``DeploymentTargetNotFoundError``, 404 - reused unchanged
+               from DEPLOY-003, identical for "does not exist" and
+               "belongs to someone else").
+            2. If ``status`` differs from the target's current status,
+               that current status must not already be terminal
+               (``DeploymentStatusTransitionError``, 409) and the
+               requested ``status`` must be a legal forward transition
+               from it, per ``STATUS_TRANSITIONS``
+               (``DeploymentStatusTransitionError``, 409).
+            3. Reporting ``Failed`` without a non-blank ``error_message``
+               is rejected (``DeploymentStatusReportValidationError``,
+               400) - defensive re-validation of what
+               ``DeploymentStatusReportRequest`` already enforces at the
+               schema layer.
+
+        ``completion_time`` is set to the current server time (never a
+        client-supplied value - this ticket's explicit "prefer
+        server-side timestamps for persistent deployment completion
+        records" instruction) when, and only when, ``status`` is
+        ``Completed`` or ``Failed``. Reporting ``Downloading`` or
+        ``Installing`` updates only ``status`` - the intermediate
+        transitions carry no ``exit_code``/``error_message``/
+        ``completion_time`` semantics of their own.
+
+        Only the two terminal outcomes are audit-logged
+        (``DEPLOYMENT_COMPLETED`` / ``DEPLOYMENT_FAILED``) - PRS FR-016's
+        Logged Events list explicitly names "Deployment Results", but does
+        not call out intermediate progress updates the way it does for
+        e.g. "Installer Downloads"; ``Downloading``/``Installing``
+        transitions are instead only recorded via this module's
+        application logger, mirroring ``poll_pending_deployment``'s
+        already-documented "routine, frequent, non-security-relevant
+        traffic" rationale for what does and does not warrant an audit
+        log entry.
+
+        Raises:
+            ``DeploymentTargetNotFoundError`` (404) - no target with
+            ``target_id`` exists for this client.
+
+            ``DeploymentStatusTransitionError`` (409) - the target is
+            already in a terminal state, or ``status`` is not a legal
+            transition from its current status.
+
+            ``DeploymentStatusReportValidationError`` (400) - ``status``
+            is ``Failed`` but ``error_message`` is missing/blank.
+        """
+        target = self._deployments.get_target_for_client(db, target_id=target_id, client_id=client.id)
+        if target is None:
+            logger.warning(
+                "Client %s reported status for unknown/foreign deployment target %s.",
+                client.id,
+                target_id,
+            )
+            raise DeploymentTargetNotFoundError(target_id)
+
+        if status == target.status:
+            logger.info(
+                "Client %s re-reported status '%s' for target %s (idempotent no-op).",
+                client.id,
+                status.value,
+                target.id,
+            )
+            return target
+
+        current_status = target.status
+        if current_status in TERMINAL_DEPLOYMENT_STATUSES:
+            raise DeploymentStatusTransitionError(target_id, current_status, status)
+
+        allowed_next_statuses = STATUS_TRANSITIONS.get(current_status, frozenset())
+        if status not in allowed_next_statuses:
+            raise DeploymentStatusTransitionError(target_id, current_status, status)
+
+        if status == DeploymentStatus.FAILED and not (error_message and error_message.strip()):
+            raise DeploymentStatusReportValidationError(
+                "error_message is required when reporting status 'Failed'."
+            )
+
+        completion_time: Optional[datetime] = None
+        if status in (DeploymentStatus.COMPLETED, DeploymentStatus.FAILED):
+            completion_time = datetime.now(timezone.utc)
+
+        updated = self._deployments.update_status(
+            db,
+            target,
+            status=status,
+            exit_code=exit_code,
+            error_message=error_message,
+            completion_time=completion_time,
+        )
+
+        if status in (DeploymentStatus.COMPLETED, DeploymentStatus.FAILED):
+            self._audit_logs.create(
+                db,
+                event_type="DEPLOYMENT_COMPLETED" if status == DeploymentStatus.COMPLETED else "DEPLOYMENT_FAILED",
+                severity=AuditSeverity.INFO if status == DeploymentStatus.COMPLETED else AuditSeverity.WARNING,
+                description=(
+                    f"Deployment target {updated.id} (deployment={updated.deployment_id}, "
+                    f"client={client.id}) reported final status '{status.value}'"
+                    f"{f' (exit_code={exit_code})' if exit_code is not None else ''}."
+                ),
+                client_id=client.id,
+            )
+            db.commit()
+        else:
+            db.commit()
+
+        logger.info(
+            "Client %s reported status '%s' -> '%s' for target %s (deployment=%s).",
+            client.id,
+            current_status.value,
+            status.value,
+            updated.id,
+            updated.deployment_id,
+        )
+        return updated
+
+    def cancel_deployment_target(
+        self,
+        db: Session,
+        *,
+        admin_id: UUID,
+        target_id: UUID,
+    ) -> DeploymentTarget:
+        """
+        Cancel a still-``Pending`` deployment target (DEPLOY-004, FR-021
+        Deployment Cancellation).
+
+        Unlike ``report_status``/``prepare_installer_download``, this
+        operation is administrator-authorized (``CurrentAdministrator``,
+        the caller in ``backend/api/routers/deployments.py``), not
+        client-authenticated - resolution therefore uses
+        ``DeploymentRepository.get_target_by_id`` (no client-ownership
+        filter), not ``get_target_for_client``.
+
+        Per FR-021's functional behavior, only a target still in
+        ``Pending`` status may be cancelled: "Once a Client Agent has
+        retrieved a deployment job through polling (FR-009), the job
+        shall no longer be eligible for cancellation through this
+        function, since the client may already be downloading or
+        installing the software." This project's ``DeploymentTarget.
+        status`` field is the sole source of truth for that check (poll
+        itself never mutates status - see ``poll_pending_deployment``'s
+        design note - so "still Pending" here means exactly what FR-021
+        describes: no status-changing action has happened yet).
+
+        Raises:
+            ``DeploymentCancellationTargetNotFoundError`` (404) - no
+            target exists with ``target_id``.
+
+            ``DeploymentCancellationNotAllowedError`` (409) - the target
+            exists but is not currently ``Pending``.
+        """
+        target = self._deployments.get_target_by_id(db, target_id)
+        if target is None:
+            raise DeploymentCancellationTargetNotFoundError(target_id)
+
+        if target.status != DeploymentStatus.PENDING:
+            raise DeploymentCancellationNotAllowedError(target_id, target.status)
+
+        updated = self._deployments.update_status(db, target, status=DeploymentStatus.CANCELLED)
+
+        self._audit_logs.create(
+            db,
+            event_type="DEPLOYMENT_CANCELLED",
+            severity=AuditSeverity.INFO,
+            description=(
+                f"Deployment target {updated.id} (deployment={updated.deployment_id}, "
+                f"client={updated.client_id}) cancelled by administrator {admin_id}."
+            ),
+            admin_id=admin_id,
+        )
+        db.commit()
+
+        logger.info("Administrator %s cancelled deployment target %s.", admin_id, updated.id)
+        return updated
+
 
 __all__ = [
     "DeploymentService",
@@ -557,5 +891,9 @@ __all__ = [
     "DeploymentTargetNotFoundError",
     "DeploymentTargetNotDownloadableError",
     "DeploymentInstallerUnavailableError",
+    "DeploymentStatusTransitionError",
+    "DeploymentStatusReportValidationError",
+    "DeploymentCancellationTargetNotFoundError",
+    "DeploymentCancellationNotAllowedError",
     "RepositoryPackageNotFoundError",
 ]

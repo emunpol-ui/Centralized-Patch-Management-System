@@ -31,6 +31,12 @@ logger = logging.getLogger(__name__)
 
 DEPLOYMENT_POLL_PATH = "/api/agent/deployments/poll"
 
+# DEPLOY-004 addition (FR-012): path template for reporting a status
+# transition for a single deployment target, mirroring the
+# ``target_id``-scoped path DEPLOY-003 already established for downloads
+# (``/api/agent/deployments/{target_id}/download``).
+DEPLOYMENT_STATUS_PATH_TEMPLATE = "/api/agent/deployments/{target_id}/status"
+
 # Chunk size used when streaming a downloaded installer to disk, matching
 # the server's own streaming chunk size in
 # ``backend.utils.file_storage.save_and_hash`` - large installer files
@@ -184,8 +190,76 @@ def download_installer(
     logger.info("Installer for target %s downloaded to %s.", target_id, destination_path)
 
 
+def report_status(
+    target_id: str,
+    status: str,
+    *,
+    server_url: str,
+    api_key: str,
+    exit_code: Optional[int] = None,
+    error_message: Optional[str] = None,
+    timeout_seconds: float = 30.0,
+) -> None:
+    """
+    Report a deployment status transition for ``target_id`` to the CPMS
+    Server (DEPLOY-004, FR-012 Deployment Status Reporting).
+
+    ``status`` must be one of the server's client-reportable values -
+    ``"Downloading"``, ``"Installing"``, ``"Completed"``, or ``"Failed"``
+    (matching ``backend.models.enums.DeploymentStatus``'s string values,
+    the same vocabulary already used by
+    ``agent.deployment.manager.DeploymentExecutionResult.status`` -
+    ``"Pending"``/``"Cancelled"`` are never sent by the Client Agent).
+    ``error_message`` is required by the server when ``status`` is
+    ``"Failed"``.
+
+    Authenticated the same way as ``poll_deployment``/``download_installer``
+    - an ``Authorization: Bearer <api_key>`` header - and scoped by the
+    server to the authenticated client's own deployment target (the
+    server never trusts ``target_id`` alone as an authorization
+    boundary).
+
+    Raises ``DeploymentCommunicationError`` if the request cannot be
+    sent, or the server rejects it (e.g. an invalid status transition, a
+    target that does not belong to this client, or a missing
+    ``error_message`` for a ``Failed`` report).
+    """
+    url = f"{server_url.rstrip('/')}{DEPLOYMENT_STATUS_PATH_TEMPLATE.format(target_id=target_id)}"
+    headers = {"Authorization": f"Bearer {api_key}"}
+
+    body: Dict[str, Any] = {"status": status}
+    if exit_code is not None:
+        body["exit_code"] = exit_code
+    if error_message is not None:
+        body["error_message"] = error_message
+
+    try:
+        response = requests.post(url, headers=headers, json=body, timeout=timeout_seconds)
+    except requests.RequestException as exc:
+        logger.error("Deployment status report to %s failed: %s", url, exc)
+        raise DeploymentCommunicationError(f"Unable to reach CPMS Server at {url}: {exc}") from exc
+
+    if not response.ok:
+        message = None
+        try:
+            resp_body = response.json()
+            if isinstance(resp_body, dict):
+                message = resp_body.get("message")
+        except ValueError:
+            pass
+        logger.error(
+            "Deployment status report to %s rejected (status=%d): %s", url, response.status_code, message
+        )
+        raise DeploymentCommunicationError(
+            message or f"Deployment status report rejected (status={response.status_code})."
+        )
+
+    logger.info("Reported status '%s' for deployment target %s.", status, target_id)
+
+
 __all__ = [
     "DeploymentCommunicationError",
     "poll_deployment",
     "download_installer",
+    "report_status",
 ]
