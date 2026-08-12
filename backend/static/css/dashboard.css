@@ -1,0 +1,9 @@
+/* DASH-001 - minimal supplemental styling for the CPMS Dashboard Home page. */
+
+body {
+    min-height: 100vh;
+}
+
+.card .display-6 {
+    font-weight: 600;
+}

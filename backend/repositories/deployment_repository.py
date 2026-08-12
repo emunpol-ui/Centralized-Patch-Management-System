@@ -24,20 +24,33 @@ that rule, consistent with the design note already documented on
 ``DeploymentTarget`` ("that is a *business* rule, enforced by the Service
 Layer in DEPLOY-001... at the data layer it is supported by the
 ``ix_deployment_targets_client_status`` index").
+
+DASH-002 (Deployment Monitoring) adds ``list_target_details`` below - a
+single, read-only, joined query used to populate the administrator-facing
+Deployment Monitoring page/API. It deliberately joins on foreign-key
+columns only (``DeploymentTarget.deployment_id``,
+``DeploymentTarget.client_id``, ``Deployment.repository_id``) rather than
+introducing or assuming any ORM ``relationship()`` attribute, so it does
+not depend on - or risk conflicting with - whatever relationship wiring
+(if any) exists on the ``Deployment``/``DeploymentTarget``/``Client``/
+``RepositoryPackage`` models. No new table, column, or migration is
+introduced.
 """
 
 from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Iterable, List, Optional
+from typing import Any, Iterable, List, Optional
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from backend.models.client import Client
 from backend.models.deployment import Deployment
 from backend.models.deployment_target import DeploymentTarget
 from backend.models.enums import DeploymentStatus
+from backend.models.repository_package import RepositoryPackage
 
 # Per-client deployment states that are not yet terminal (PRS FR-012
 # Deployment Status Values: Completed, Failed, and Cancelled are terminal;
@@ -233,6 +246,98 @@ class DeploymentRepository:
         request, since it performs no client-ownership check at all.
         """
         return db.get(DeploymentTarget, target_id)
+
+    def count_deployments(self, db: Session) -> int:
+        """
+        Return the total number of ``Deployment`` (batch) rows.
+
+        Added by DASH-001 (Dashboard Home) for the deployment summary
+        card's "total batches" figure. A simple ``COUNT(*)`` rather than
+        loading every row, since only the count is needed.
+        """
+        stmt = select(func.count()).select_from(Deployment)
+        return db.execute(stmt).scalar_one()
+
+    def count_targets_by_status(self, db: Session) -> dict[DeploymentStatus, int]:
+        """
+        Return the number of ``DeploymentTarget`` rows for each
+        ``DeploymentStatus`` value, as a ``{status: count}`` mapping.
+        Statuses with zero targets are simply absent from the returned
+        mapping (callers should default to 0 via ``dict.get``).
+
+        Added by DASH-001 (Dashboard Home) for the deployment summary
+        card (Pending/Downloading/Installing/Completed/Failed/Cancelled
+        counts). A single ``GROUP BY`` aggregate query, consistent with
+        this repository's existing preference for efficient, purpose-built
+        queries (e.g. ``get_pending_target_for_client``) over loading
+        every row and counting in Python.
+
+        Reused as-is by DASH-002 (Deployment Monitoring) for its own
+        status-breakdown display - see
+        ``DashboardService.get_deployment_monitoring``.
+        """
+        stmt = select(DeploymentTarget.status, func.count(DeploymentTarget.id)).group_by(
+            DeploymentTarget.status
+        )
+        return {status: count for status, count in db.execute(stmt).all()}
+
+    def list_target_details(
+        self,
+        db: Session,
+        *,
+        status: Optional[DeploymentStatus] = None,
+        client_id: Optional[uuid.UUID] = None,
+        deployment_id: Optional[uuid.UUID] = None,
+        limit: int = 50,
+    ) -> List[Any]:
+        """
+        Return ``DeploymentTarget`` rows joined with their parent
+        ``Deployment`` (batch), target ``Client``, and deployed
+        ``RepositoryPackage``, most-recently-created first, optionally
+        filtered by target status, target client, and/or deployment
+        batch.
+
+        Added by DASH-002 (Backlog "Deployment Monitoring" - "Active/
+        recent deployments", "Per-client deployment status", "Clear
+        status presentation for Pending, Downloading, Installing,
+        Completed, and Failed"). This is the single query backing the
+        administrator-facing Deployment Monitoring page and its JSON
+        counterpart (``DashboardService.get_deployment_monitoring``).
+
+        Each returned row is a 4-tuple
+        ``(DeploymentTarget, Deployment, Client, RepositoryPackage)``.
+        Deliberately returns whole ORM objects rather than a narrower
+        column projection, so the caller (the Service Layer) - not this
+        repository - decides which attributes are actually surfaced to
+        the administrator, consistent with this repository's existing
+        "no business/presentation decisions" constraint.
+
+        The joins use only existing foreign-key columns
+        (``DeploymentTarget.deployment_id``, ``DeploymentTarget.client_id``,
+        ``Deployment.repository_id``) that earlier tickets (DEPLOY-001)
+        already established; no new column, index, or migration is
+        required.
+
+        ``limit`` bounds the result set for the "recent deployments" view
+        (this is intentionally not a paginated full-history listing -
+        DASH-003/TEST-001 remain the place for that, per this ticket's
+        scope).
+        """
+        stmt = (
+            select(DeploymentTarget, Deployment, Client, RepositoryPackage)
+            .join(Deployment, DeploymentTarget.deployment_id == Deployment.id)
+            .join(Client, DeploymentTarget.client_id == Client.id)
+            .join(RepositoryPackage, Deployment.repository_id == RepositoryPackage.id)
+        )
+        if status is not None:
+            stmt = stmt.where(DeploymentTarget.status == status)
+        if client_id is not None:
+            stmt = stmt.where(DeploymentTarget.client_id == client_id)
+        if deployment_id is not None:
+            stmt = stmt.where(DeploymentTarget.deployment_id == deployment_id)
+
+        stmt = stmt.order_by(DeploymentTarget.created_at.desc()).limit(limit)
+        return list(db.execute(stmt).all())
 
     def update_status(
         self,

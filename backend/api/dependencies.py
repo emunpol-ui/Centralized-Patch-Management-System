@@ -24,6 +24,7 @@ from backend.models.client import Client
 from backend.services.auth_service import AuthenticationError, AuthService
 from backend.services.client_auth_service import ClientAuthService
 from backend.services.client_service import ClientService
+from backend.services.dashboard_service import DashboardService
 from backend.services.deployment_service import DeploymentService
 from backend.services.heartbeat_service import HeartbeatService
 from backend.services.inventory_service import InventoryService
@@ -147,6 +148,20 @@ def get_deployment_service() -> DeploymentService:
 
 # Reusable, typed dependency: injects a configured `DeploymentService`.
 DeploymentServiceDependency = Annotated[DeploymentService, Depends(get_deployment_service)]
+
+
+def get_dashboard_service(settings: SettingsDependency) -> DashboardService:
+    """
+    Build a ``DashboardService`` (DASH-001 - Dashboard Home summary
+    business logic). Needs ``Settings`` (for
+    ``CLIENT_HEARTBEAT_TIMEOUT_MINUTES``), the same pattern already used
+    by ``get_auth_service`` above.
+    """
+    return DashboardService(settings=settings)
+
+
+# Reusable, typed dependency: injects a configured `DashboardService`.
+DashboardServiceDependency = Annotated[DashboardService, Depends(get_dashboard_service)]
 
 
 def require_administrator(

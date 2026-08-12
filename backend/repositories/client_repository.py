@@ -44,6 +44,22 @@ class ClientRepository:
         """
         return db.get(Client, client_id)
 
+    def list_all(self, db: Session) -> list[Client]:
+        """
+        Return every registered ``Client``.
+
+        Added by DASH-001 (Dashboard Home) for the client summary card,
+        which needs the full set of registered clients to compute
+        online/offline/unknown counts (see
+        ``backend.services.dashboard_service.DashboardService``). No
+        filtering or pagination is applied, consistent with the project's
+        expected scale (PRS Section 2.4: approximately 10-20 client
+        computers) and the same "load everything, classify in Python"
+        pattern already used by ``VersionComparisonService``.
+        """
+        stmt = select(Client)
+        return list(db.execute(stmt).scalars().all())
+
     def get_by_api_key_hash(self, db: Session, api_key_hash: str) -> Client | None:
         """
         Return the ``Client`` whose ``api_key_hash`` matches, or ``None``.

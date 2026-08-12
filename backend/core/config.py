@@ -120,6 +120,17 @@ class Settings(BaseSettings):
     # deployed (see SESSION_COOKIE_SECURE in .env.example).
     SESSION_COOKIE_SECURE: bool = False
 
+    # --- Client heartbeat / online status (DASH-001) ------------------------
+    # FR-003/FR-014 describe a client as "Offline" once no heartbeat has been
+    # received within a "configurable timeout period". No SYS-001-backed,
+    # DB-persisted configuration table exists yet, so - consistent with
+    # SESSION_INACTIVITY_TIMEOUT_MINUTES above - this is sourced from the
+    # environment like every other setting in this class. The Dashboard
+    # Home client summary (DASH-001) is the first feature that needs this
+    # value; no existing code previously computed effective online/offline
+    # status (see the design note in backend/services/dashboard_service.py).
+    CLIENT_HEARTBEAT_TIMEOUT_MINUTES: int = 10
+
     @property
     def session_inactivity_timeout_seconds(self) -> int:
         """`SESSION_INACTIVITY_TIMEOUT_MINUTES` expressed in seconds."""

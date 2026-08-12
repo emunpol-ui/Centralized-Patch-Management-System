@@ -1,0 +1,154 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h1 class="h3 mb-0">Dashboard</h1>
+        <p class="text-muted mb-0">
+            {{ overview.system.app_name }} v{{ overview.system.app_version }}
+            &middot; {{ overview.system.environment }}
+        </p>
+    </div>
+    <div class="text-muted small">
+        As of {{ overview.system.server_time.strftime("%Y-%m-%d %H:%M:%S UTC") }}
+    </div>
+</div>
+
+<div class="row g-3 mb-4">
+    <div class="col-sm-6 col-lg-3">
+        <div class="card h-100 shadow-sm">
+            <div class="card-body">
+                <div class="text-muted text-uppercase small">Registered Clients</div>
+                <div class="display-6">{{ overview.clients.total }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+        <div class="card h-100 shadow-sm">
+            <div class="card-body">
+                <div class="text-muted text-uppercase small">Deployment Batches</div>
+                <div class="display-6">{{ overview.deployments.total_batches }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+        <div class="card h-100 shadow-sm">
+            <div class="card-body">
+                <div class="text-muted text-uppercase small">Active Deployments</div>
+                <div class="display-6">{{ overview.deployments.active }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+        <div class="card h-100 shadow-sm">
+            <div class="card-body">
+                <div class="text-muted text-uppercase small">Repository Packages</div>
+                <div class="display-6">{{ overview.repository.total }}</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3">
+    <!-- Client Summary -->
+    <div class="col-lg-4">
+        <div class="card h-100 shadow-sm">
+            <div class="card-header">Client Summary</div>
+            <div class="card-body">
+                <table class="table table-sm mb-0">
+                    <tbody>
+                        <tr>
+                            <td>Total</td>
+                            <td class="text-end fw-semibold">{{ overview.clients.total }}</td>
+                        </tr>
+                        <tr>
+                            <td><span class="badge text-bg-success">Online</span></td>
+                            <td class="text-end">{{ overview.clients.online }}</td>
+                        </tr>
+                        <tr>
+                            <td><span class="badge text-bg-secondary">Offline</span></td>
+                            <td class="text-end">{{ overview.clients.offline }}</td>
+                        </tr>
+                        <tr>
+                            <td><span class="badge text-bg-light text-dark border">Unknown</span></td>
+                            <td class="text-end">{{ overview.clients.unknown }}</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Deployment Summary -->
+    <div class="col-lg-4">
+        <div class="card h-100 shadow-sm">
+            <div class="card-header">Deployment Summary</div>
+            <div class="card-body">
+                <table class="table table-sm mb-0">
+                    <tbody>
+                        <tr>
+                            <td>Batches</td>
+                            <td class="text-end fw-semibold">{{ overview.deployments.total_batches }}</td>
+                        </tr>
+                        <tr>
+                            <td>Targets (total)</td>
+                            <td class="text-end fw-semibold">{{ overview.deployments.total_targets }}</td>
+                        </tr>
+                        <tr>
+                            <td><span class="badge text-bg-warning text-dark">Pending</span></td>
+                            <td class="text-end">{{ overview.deployments.pending }}</td>
+                        </tr>
+                        <tr>
+                            <td><span class="badge text-bg-info text-dark">Downloading</span></td>
+                            <td class="text-end">{{ overview.deployments.downloading }}</td>
+                        </tr>
+                        <tr>
+                            <td><span class="badge text-bg-info text-dark">Installing</span></td>
+                            <td class="text-end">{{ overview.deployments.installing }}</td>
+                        </tr>
+                        <tr>
+                            <td><span class="badge text-bg-success">Completed</span></td>
+                            <td class="text-end">{{ overview.deployments.completed }}</td>
+                        </tr>
+                        <tr>
+                            <td><span class="badge text-bg-danger">Failed</span></td>
+                            <td class="text-end">{{ overview.deployments.failed }}</td>
+                        </tr>
+                        <tr>
+                            <td><span class="badge text-bg-secondary">Cancelled</span></td>
+                            <td class="text-end">{{ overview.deployments.cancelled }}</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Repository Summary -->
+    <div class="col-lg-4">
+        <div class="card h-100 shadow-sm">
+            <div class="card-header">Repository Summary</div>
+            <div class="card-body">
+                <table class="table table-sm mb-0">
+                    <tbody>
+                        <tr>
+                            <td>Total Packages</td>
+                            <td class="text-end fw-semibold">{{ overview.repository.total }}</td>
+                        </tr>
+                        <tr>
+                            <td><span class="badge text-bg-success">Approved</span></td>
+                            <td class="text-end">{{ overview.repository.approved }}</td>
+                        </tr>
+                        <tr>
+                            <td><span class="badge text-bg-secondary">Inactive</span></td>
+                            <td class="text-end">{{ overview.repository.inactive }}</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -23,15 +23,17 @@ from typing import AsyncIterator
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from backend.api.routers.agent import router as agent_router
 from backend.api.routers.auth import router as auth_router
+from backend.api.routers.dashboard import router as dashboard_router
 from backend.api.routers.deployments import router as deployments_router
 from backend.api.routers.health import router as health_router
 from backend.api.routers.registration import router as registration_router
 from backend.api.routers.repository import router as repository_router
 from backend.api.routers.updates import router as updates_router
-from backend.core.config import get_settings
+from backend.core.config import BASE_DIR, get_settings
 from backend.core.exceptions import register_exception_handlers
 from backend.core.logging import configure_logging
 
@@ -90,6 +92,14 @@ def create_app() -> FastAPI:
     # --- Global exception handling ------------------------------------------
     register_exception_handlers(application)
 
+    # --- Static assets (DASH-001) --------------------------------------------
+    # Serves backend/static/{css,js,images,icons} at /static/*, used by the
+    # Dashboard Home and login templates below. Nothing under backend/static
+    # was served over HTTP before this ticket (see REP-001's design note on
+    # why the *repository* directory is deliberately kept separate from,
+    # and outside of, this web-server-exposed directory).
+    application.mount("/static", StaticFiles(directory=str(BASE_DIR / "backend" / "static")), name="static")
+
     # --- Routers -------------------------------------------------------------
     application.include_router(health_router)
     application.include_router(auth_router)
@@ -98,6 +108,7 @@ def create_app() -> FastAPI:
     application.include_router(updates_router)
     application.include_router(repository_router)
     application.include_router(deployments_router)
+    application.include_router(dashboard_router)
 
     return application
 

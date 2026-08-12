@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+
+{% block title %}Audit Logs{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h1 class="h3 mb-0">Audit Logs</h1>
+        <p class="text-muted mb-0">Recorded system and administrative events (FR-016).</p>
+    </div>
+</div>
+
+<div class="row g-3 mb-3">
+    <div class="col-sm-6 col-lg-3">
+        <div class="card h-100 shadow-sm">
+            <div class="card-body">
+                <div class="text-muted text-uppercase small">Matching Entries</div>
+                <div class="display-6">{{ result.total }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+        <div class="card h-100 shadow-sm">
+            <div class="card-body">
+                <div class="text-muted text-uppercase small">Page</div>
+                <div class="display-6">{{ result.page }} / {{ result.total_pages if result.total_pages else 1 }}</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card shadow-sm mb-3">
+    <div class="card-body">
+        <form method="get" action="/dashboard/audit-logs" class="row g-2 align-items-end"
+      onsubmit="this.querySelectorAll('select').forEach(function(select) {
+          if (select.value === '') {
+              select.removeAttribute('name');
+          }
+      });">
+            <div class="col-sm-2">
+                <label for="eventTypeFilter" class="form-label small mb-1">Event Type</label>
+                <select id="eventTypeFilter" name="event_type" class="form-select form-select-sm">
+                    <option value="" {% if not selected_event_type %}selected{% endif %}>All types</option>
+                    {% for et in result.event_types %}
+                    <option value="{{ et }}" {% if selected_event_type == et %}selected{% endif %}>{{ et }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-sm-2">
+                <label for="severityFilter" class="form-label small mb-1">Severity</label>
+                <select id="severityFilter" name="severity" class="form-select form-select-sm">
+                    <option value="" {% if not selected_severity %}selected{% endif %}>All severities</option>
+                    {% for sev in result.severities %}
+                    <option value="{{ sev }}" {% if selected_severity == sev %}selected{% endif %}>{{ sev }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-sm-2">
+                <label for="clientFilter" class="form-label small mb-1">Client</label>
+                <select id="clientFilter" name="client_id" class="form-select form-select-sm">
+                    <option value="" {% if not selected_client_id %}selected{% endif %}>All clients</option>
+                    {% for client in clients %}
+                    <option
+                        value="{{ client.id }}"
+                        {% if selected_client_id and selected_client_id == client.id %}selected{% endif %}
+                    >
+                        {{ client.hostname }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-sm-2">
+                <label for="dateFrom" class="form-label small mb-1">From</label>
+                <input
+                    type="date" id="dateFrom" name="date_from" class="form-control form-control-sm"
+                    value="{{ selected_date_from.isoformat() if selected_date_from else '' }}"
+                >
+            </div>
+            <div class="col-sm-2">
+                <label for="dateTo" class="form-label small mb-1">To</label>
+                <input
+                    type="date" id="dateTo" name="date_to" class="form-control form-control-sm"
+                    value="{{ selected_date_to.isoformat() if selected_date_to else '' }}"
+                >
+            </div>
+            <div class="col-sm-2">
+                <label for="searchFilter" class="form-label small mb-1">Search</label>
+                <input
+                    type="text" id="searchFilter" name="search" class="form-control form-control-sm"
+                    placeholder="Description contains..." value="{{ selected_search or '' }}"
+                >
+            </div>
+            <div class="col-sm-3 mt-2">
+                <button type="submit" class="btn btn-outline-primary btn-sm w-100">Filter</button>
+            </div>
+            <div class="col-sm-3 mt-2">
+                <a href="/dashboard/audit-logs" class="btn btn-outline-secondary btn-sm w-100">Clear filters</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card shadow-sm">
+    <div class="card-header">
+        Audit Log Entries
+        <span class="text-muted small">
+            (showing {{ rows|length }} of {{ result.total }}, page {{ result.page }})
+        </span>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-sm table-hover mb-0 align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>Timestamp</th>
+                        <th>Severity</th>
+                        <th>Event Type</th>
+                        <th>Actor</th>
+                        <th>Description</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in rows %}
+                    <tr>
+                        <td class="small text-nowrap">
+                            {{ row.entry.timestamp.strftime("%Y-%m-%d %H:%M:%S UTC") }}
+                        </td>
+                        <td><span class="badge {{ row.badge_class }}">{{ row.entry.severity }}</span></td>
+                        <td class="small">{{ row.entry.event_type }}</td>
+                        <td class="small">
+                            {% if row.entry.admin_username %}
+                                <span class="text-muted">Admin:</span> {{ row.entry.admin_username }}
+                            {% elif row.entry.client_hostname %}
+                                <span class="text-muted">Client:</span> {{ row.entry.client_hostname }}
+                            {% else %}
+                                <span class="text-muted">System</span>
+                            {% endif %}
+                        </td>
+                        <td class="small">{{ row.entry.description }}</td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="5" class="text-center text-muted py-4">
+                            No audit log entries match the current filters.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% if result.total_pages > 1 %}
+    <div class="card-footer d-flex justify-content-between align-items-center">
+        <a
+            class="btn btn-outline-secondary btn-sm {% if page <= 1 %}disabled{% endif %}"
+            href="?page={{ page - 1 }}&page_size={{ page_size }}{% if selected_event_type %}&event_type={{ selected_event_type }}{% endif %}{% if selected_severity %}&severity={{ selected_severity }}{% endif %}{% if selected_client_id %}&client_id={{ selected_client_id }}{% endif %}{% if selected_date_from %}&date_from={{ selected_date_from.isoformat() }}{% endif %}{% if selected_date_to %}&date_to={{ selected_date_to.isoformat() }}{% endif %}{% if selected_search %}&search={{ selected_search }}{% endif %}"
+        >&laquo; Previous</a>
+        <span class="text-muted small">Page {{ page }} of {{ result.total_pages }}</span>
+        <a
+            class="btn btn-outline-secondary btn-sm {% if page >= result.total_pages %}disabled{% endif %}"
+            href="?page={{ page + 1 }}&page_size={{ page_size }}{% if selected_event_type %}&event_type={{ selected_event_type }}{% endif %}{% if selected_severity %}&severity={{ selected_severity }}{% endif %}{% if selected_client_id %}&client_id={{ selected_client_id }}{% endif %}{% if selected_date_from %}&date_from={{ selected_date_from.isoformat() }}{% endif %}{% if selected_date_to %}&date_to={{ selected_date_to.isoformat() }}{% endif %}{% if selected_search %}&search={{ selected_search }}{% endif %}"
+        >Next &raquo;</a>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}
