@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+
+{% block title %}{{ software.client_hostname }} &middot; Software{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h1 class="h3 mb-0">{{ software.client_hostname }} &middot; Software</h1>
+        <p class="text-muted mb-0">Installed software and update status (FR-007).</p>
+    </div>
+    <div>
+        <a href="/dashboard/clients/{{ software.client_id }}" class="btn btn-outline-secondary btn-sm">&laquo; Back to Client</a>
+    </div>
+</div>
+
+<div class="row g-3 mb-3">
+    <div class="col-sm-6 col-lg-3">
+        <div class="card h-100 shadow-sm">
+            <div class="card-body">
+                <div class="text-muted text-uppercase small">Total Installed</div>
+                <div class="display-6">{{ software.summary.total }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+        <div class="card h-100 shadow-sm">
+            <div class="card-body">
+                <div class="text-muted text-uppercase small">Up to Date</div>
+                <div class="display-6 text-success">{{ software.summary.up_to_date }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+        <div class="card h-100 shadow-sm">
+            <div class="card-body">
+                <div class="text-muted text-uppercase small">Update Available</div>
+                <div class="display-6 text-warning">{{ software.summary.update_available }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+        <div class="card h-100 shadow-sm">
+            <div class="card-body">
+                <div class="text-muted text-uppercase small">Not Managed</div>
+                <div class="display-6 text-secondary">{{ software.summary.not_managed }}</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card shadow-sm mb-3">
+    <div class="card-body">
+        <form method="get" action="/dashboard/clients/{{ software.client_id }}/software" class="row g-2 align-items-end">
+            <div class="col-sm-5">
+                <label for="searchFilter" class="form-label small mb-1">Search (software name)</label>
+                <input
+                    type="text" id="searchFilter" name="search" class="form-control form-control-sm"
+                    placeholder="e.g. Chrome" value="{{ selected_search or '' }}"
+                >
+            </div>
+            <div class="col-sm-3">
+                <label for="publisherFilter" class="form-label small mb-1">Publisher</label>
+                <input
+                    type="text" id="publisherFilter" name="publisher" class="form-control form-control-sm"
+                    placeholder="e.g. Google" value="{{ selected_publisher or '' }}"
+                >
+            </div>
+            <div class="col-sm-2">
+                <button type="submit" class="btn btn-outline-primary btn-sm w-100">Filter</button>
+            </div>
+            <div class="col-sm-2 text-sm-end">
+                <a href="/dashboard/clients/{{ software.client_id }}/software" class="btn btn-outline-secondary btn-sm">Clear filters</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card shadow-sm">
+    <div class="card-header">
+        Installed Software
+        <span class="text-muted small">(showing {{ rows|length }} of {{ software.summary.total }})</span>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-sm table-hover mb-0 align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>Software Name</th>
+                        <th>Publisher</th>
+                        <th>Installed Version</th>
+                        <th>Install Date</th>
+                        <th>Status</th>
+                        <th>Approved Version</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in rows %}
+                    <tr>
+                        <td>{{ row.item.software_name }}</td>
+                        <td class="small">
+                            {% if row.item.publisher %}
+                                {{ row.item.publisher }}
+                            {% else %}
+                                &mdash;
+                            {% endif %}
+                        </td>
+                        <td class="small">{{ row.item.installed_version }}</td>
+                        <td class="small">
+                            {% if row.item.install_date %}
+                                {{ row.item.install_date.isoformat() }}
+                            {% else %}
+                                &mdash;
+                            {% endif %}
+                        </td>
+                        <td><span class="badge {{ row.badge_class }}">{{ row.item.status.value }}</span></td>
+                        <td class="small">
+                            {% if row.item.approved_version %}
+                                {{ row.item.approved_version }}
+                            {% else %}
+                                &mdash;
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="6" class="text-center text-muted py-4">
+                            No software inventory has been collected for this client yet.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

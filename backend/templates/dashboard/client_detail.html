@@ -1,0 +1,134 @@
+{% extends "base.html" %}
+
+{% block title %}{{ detail.hostname }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h1 class="h3 mb-0">{{ detail.hostname }}</h1>
+        <p class="text-muted mb-0">Client details and recent deployment history.</p>
+    </div>
+    <div>
+        <a href="/dashboard/clients" class="btn btn-outline-secondary btn-sm">&laquo; Back to Clients</a>
+        <a href="/dashboard/clients/{{ detail.id }}/software" class="btn btn-outline-primary btn-sm">View Software</a>
+    </div>
+</div>
+
+<div class="row g-3 mb-3">
+    <div class="col-lg-6">
+        <div class="card h-100 shadow-sm">
+            <div class="card-header">Client Information</div>
+            <div class="card-body">
+                <table class="table table-sm mb-0">
+                    <tbody>
+                        <tr>
+                            <td>Hostname</td>
+                            <td class="text-end fw-semibold">{{ detail.hostname }}</td>
+                        </tr>
+                        <tr>
+                            <td>IP Address</td>
+                            <td class="text-end">{{ detail.ip_address }}</td>
+                        </tr>
+                        <tr>
+                            <td>Operating System</td>
+                            <td class="text-end">{{ detail.operating_system }}</td>
+                        </tr>
+                        <tr>
+                            <td>Agent Version</td>
+                            <td class="text-end">{{ detail.agent_version }}</td>
+                        </tr>
+                        <tr>
+                            <td>Agent GUID</td>
+                            <td class="text-end small text-muted">{{ detail.agent_guid }}</td>
+                        </tr>
+                        <tr>
+                            <td>Status</td>
+                            <td class="text-end">
+                                {% if detail.status.value == "Online" %}
+                                <span class="badge text-bg-success">Online</span>
+                                {% elif detail.status.value == "Offline" %}
+                                <span class="badge text-bg-secondary">Offline</span>
+                                {% else %}
+                                <span class="badge text-bg-light text-dark border">Unknown</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>Last Heartbeat</td>
+                            <td class="text-end small">
+                                {% if detail.last_heartbeat %}
+                                    {{ detail.last_heartbeat.strftime("%Y-%m-%d %H:%M:%S UTC") }}
+                                {% else %}
+                                    &mdash;
+                                {% endif %}
+                            </td>
+                        </tr>
+                        <tr>
+                            <td>Registered</td>
+                            <td class="text-end small">{{ detail.registration_date.strftime("%Y-%m-%d %H:%M:%S UTC") }}</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card shadow-sm">
+    <div class="card-header">
+        Deployment History
+        <span class="text-muted small">(most recent {{ detail.deployment_targets|length }})</span>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-sm table-hover mb-0 align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>Software</th>
+                        <th>Status</th>
+                        <th>Created</th>
+                        <th>Completed</th>
+                        <th>Exit Code</th>
+                        <th>Error</th>
+                        <th>Batch</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in rows %}
+                    <tr>
+                        <td>
+                            {{ row.target.software_name }}
+                            <span class="text-muted small">{{ row.target.software_version }}</span>
+                        </td>
+                        <td><span class="badge {{ row.badge_class }}">{{ row.label }}</span></td>
+                        <td class="small">{{ row.target.created_at.strftime("%Y-%m-%d %H:%M:%S UTC") }}</td>
+                        <td class="small">
+                            {% if row.target.completion_time %}
+                                {{ row.target.completion_time.strftime("%Y-%m-%d %H:%M:%S UTC") }}
+                            {% else %}
+                                &mdash;
+                            {% endif %}
+                        </td>
+                        <td class="small">
+                            {% if row.target.exit_code is not none %}
+                                {{ row.target.exit_code }}
+                            {% else %}
+                                &mdash;
+                            {% endif %}
+                        </td>
+                        <td class="small text-danger">{{ row.target.error_message or "" }}</td>
+                        <td class="small text-muted">{{ row.target.deployment_id }}</td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="7" class="text-center text-muted py-4">
+                            No deployment history for this client.
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+
+{% block title %}{{ package.software_name }} {{ package.version }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h1 class="h3 mb-0">{{ package.software_name }} <span class="text-muted">v{{ package.version }}</span></h1>
+        <p class="text-muted mb-0">Repository package details.</p>
+    </div>
+    <a href="/dashboard/repository" class="btn btn-outline-secondary btn-sm">Back to Repository</a>
+</div>
+
+{% if deactivated %}
+<div class="alert alert-success alert-dismissible fade show" role="alert">
+    Repository package deactivated successfully.
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+</div>
+{% endif %}
+
+<div class="card shadow-sm">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span>Package Metadata</span>
+        <span class="badge {{ badge_class }}">{{ package.approval_status.value }}</span>
+    </div>
+    <div class="card-body">
+        <dl class="row mb-0">
+            <dt class="col-sm-3">Package ID</dt>
+            <dd class="col-sm-9"><code>{{ package.id }}</code></dd>
+
+            <dt class="col-sm-3">Software Name</dt>
+            <dd class="col-sm-9">{{ package.software_name }}</dd>
+
+            <dt class="col-sm-3">Version</dt>
+            <dd class="col-sm-9">{{ package.version }}</dd>
+
+            <dt class="col-sm-3">Installer Type</dt>
+            <dd class="col-sm-9">{{ package.installer_type.value }}</dd>
+
+            <dt class="col-sm-3">Installer Filename</dt>
+            <dd class="col-sm-9"><code>{{ package.installer_filename }}</code></dd>
+
+            <dt class="col-sm-3">File Size</dt>
+            <dd class="col-sm-9">{{ "{:,}".format(package.file_size) }} bytes</dd>
+
+            <dt class="col-sm-3">SHA-256 Checksum</dt>
+            <dd class="col-sm-9"><code class="text-break">{{ package.checksum }}</code></dd>
+
+            <dt class="col-sm-3">Silent Install Command</dt>
+            <dd class="col-sm-9"><code class="text-break">{{ package.silent_command }}</code></dd>
+
+            <dt class="col-sm-3">Approval Status</dt>
+            <dd class="col-sm-9"><span class="badge {{ badge_class }}">{{ package.approval_status.value }}</span></dd>
+
+            <dt class="col-sm-3">Uploaded</dt>
+            <dd class="col-sm-9">{{ package.created_at.strftime("%Y-%m-%d %H:%M:%S UTC") }}</dd>
+
+            <dt class="col-sm-3">Last Updated</dt>
+            <dd class="col-sm-9">{{ package.updated_at.strftime("%Y-%m-%d %H:%M:%S UTC") }}</dd>
+        </dl>
+    </div>
+    <div class="card-footer d-flex justify-content-end">
+        {% if package.approval_status.value == "Approved" %}
+        <button id="deactivateButton" type="button" class="btn btn-outline-danger btn-sm" data-package-id="{{ package.id }}">
+            Deactivate
+        </button>
+        {% else %}
+        <span class="text-muted small align-self-center">This package is already inactive.</span>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+    // Posts directly to the existing, already-secured
+    // POST /api/admin/repository/packages/{package_id}/deactivate
+    // endpoint (REP-002/FR-017) using the session cookie (sent
+    // automatically) plus the CSRF token cookie (NFR-028) - the same
+    // double-submit-cookie pattern already used by the navbar "Log out"
+    // button in dashboard.js, whose readCookie() helper is reused here
+    // unmodified. No second deactivation mechanism is introduced.
+    (function () {
+        const deactivateButton = document.getElementById("deactivateButton");
+        if (!deactivateButton) {
+            return;
+        }
+
+        deactivateButton.addEventListener("click", async function () {
+            if (!confirm("Deactivate this repository package? It will no longer be available for new deployments.")) {
+                return;
+            }
+
+            deactivateButton.disabled = true;
+            const packageId = deactivateButton.dataset.packageId;
+
+            try {
+                const response = await fetch(
+                    "/api/admin/repository/packages/" + packageId + "/deactivate",
+                    {
+                        method: "POST",
+                        credentials: "same-origin",
+                        headers: {
+                            "X-CSRF-Token": readCookie("csrf_token") || "",
+                        },
+                    }
+                );
+
+                if (response.ok) {
+                    window.location = "/dashboard/repository/" + packageId + "?deactivated=1";
+                } else {
+                    deactivateButton.disabled = false;
+                    alert("Failed to deactivate the package. Please try again.");
+                }
+            } catch (err) {
+                deactivateButton.disabled = false;
+                alert("Failed to deactivate the package. Please try again.");
+            }
+        });
+    })();
+</script>
+{% endblock %}

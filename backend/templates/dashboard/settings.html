@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+
+{% block title %}Settings{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h1 class="h3 mb-0">System Configuration</h1>
+        <p class="text-muted mb-0">
+            {% if values.is_persisted %}
+                Showing saved configuration.
+            {% else %}
+                Showing application defaults &mdash; no configuration has been saved yet.
+            {% endif %}
+        </p>
+    </div>
+</div>
+
+{% if saved %}
+<div class="alert alert-success alert-dismissible fade show" role="alert">
+    Configuration saved successfully.
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+</div>
+{% endif %}
+
+<div id="settingsError" class="alert alert-danger d-none" role="alert"></div>
+
+<form id="settingsForm" class="row g-4">
+    <div class="col-lg-8">
+        <div class="card shadow-sm mb-3">
+            <div class="card-header">Agent / Client Behavior</div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label for="clientHeartbeatTimeout" class="form-label">Client Heartbeat Timeout</label>
+                    <div class="input-group" style="max-width: 260px;">
+                        <input
+                            type="number"
+                            class="form-control"
+                            id="clientHeartbeatTimeout"
+                            name="client_heartbeat_timeout_minutes"
+                            min="1"
+                            max="1440"
+                            value="{{ values.client_heartbeat_timeout_minutes }}"
+                            required
+                        >
+                        <span class="input-group-text">minutes</span>
+                    </div>
+                    <div class="form-text">
+                        A client with no heartbeat received within this period is shown as Offline (FR-014).
+                        Range: 1&ndash;1440 minutes.
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card shadow-sm mb-3">
+            <div class="card-header">Repository</div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label for="maxUploadSize" class="form-label">Maximum Installer Upload Size</label>
+                    <div class="input-group" style="max-width: 260px;">
+                        <input
+                            type="number"
+                            class="form-control"
+                            id="maxUploadSize"
+                            name="max_installer_upload_size_mb"
+                            min="1"
+                            max="2048"
+                            value="{{ values.max_installer_upload_size_mb }}"
+                            required
+                        >
+                        <span class="input-group-text">MB</span>
+                    </div>
+                    <div class="form-text">
+                        Installer uploads larger than this are rejected (FR-006). Range: 1&ndash;2048 MB.
+                    </div>
+                </div>
+                <div class="form-text text-muted">
+                    Repository storage location is not configurable through this page &mdash; see the
+                    Known Limitations note in the SYS-001 implementation report.
+                </div>
+            </div>
+        </div>
+
+        <div class="card shadow-sm mb-3">
+            <div class="card-header">Administration</div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label for="sessionTimeout" class="form-label">Administrator Session Timeout</label>
+                    <div class="input-group" style="max-width: 260px;">
+                        <input
+                            type="number"
+                            class="form-control"
+                            id="sessionTimeout"
+                            name="session_inactivity_timeout_minutes"
+                            min="1"
+                            max="1440"
+                            value="{{ values.session_inactivity_timeout_minutes }}"
+                            required
+                        >
+                        <span class="input-group-text">minutes</span>
+                    </div>
+                    <div class="form-text">
+                        An administrator session expires after this many minutes of inactivity (NFR-028).
+                        Range: 1&ndash;1440 minutes. Applies to new and existing sessions on their next
+                        request.
+                    </div>
+                </div>
+                <div class="form-text text-muted">
+                    Log retention is not yet configurable through this page &mdash; see the Known
+                    Limitations note in the SYS-001 implementation report.
+                </div>
+            </div>
+        </div>
+
+        <button type="submit" class="btn btn-primary" id="saveSettingsButton">Save Changes</button>
+    </div>
+</form>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const form = document.getElementById("settingsForm");
+    const errorBox = document.getElementById("settingsError");
+    const saveButton = document.getElementById("saveSettingsButton");
+
+    function getCookie(name) {
+        const match = document.cookie.match(new RegExp("(^| )" + name + "=([^;]+)"));
+        return match ? decodeURIComponent(match[2]) : null;
+    }
+
+    form.addEventListener("submit", async function (event) {
+        event.preventDefault();
+        errorBox.classList.add("d-none");
+        errorBox.textContent = "";
+        saveButton.disabled = true;
+
+        const payload = {
+            session_inactivity_timeout_minutes: parseInt(form.session_inactivity_timeout_minutes.value, 10),
+            client_heartbeat_timeout_minutes: parseInt(form.client_heartbeat_timeout_minutes.value, 10),
+            max_installer_upload_size_mb: parseInt(form.max_installer_upload_size_mb.value, 10),
+        };
+
+        try {
+            const response = await fetch("/api/admin/settings", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-CSRF-Token": getCookie("csrf_token") || "",
+                },
+                credentials: "same-origin",
+                body: JSON.stringify(payload),
+            });
+
+            const body = await response.json().catch(() => null);
+
+            if (!response.ok) {
+                const message = (body && (body.error || body.message)) || "Failed to save configuration.";
+                errorBox.textContent = message;
+                errorBox.classList.remove("d-none");
+                saveButton.disabled = false;
+                return;
+            }
+
+            window.location.href = "/dashboard/settings?saved=1";
+        } catch (err) {
+            errorBox.textContent = "A network error occurred while saving configuration.";
+            errorBox.classList.remove("d-none");
+            saveButton.disabled = false;
+        }
+    });
+});
+</script>
+{% endblock %}

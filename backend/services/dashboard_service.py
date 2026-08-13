@@ -12,18 +12,29 @@ Service Layer Pattern (SAD Section 5.5, Section 9.6 "Dashboard
 Module").
 
 This service performs no writes and enforces no business rules beyond
-computing display-ready aggregates; it purely composes four
-already-existing, already-completed repositories:
+computing display-ready aggregates; it purely composes already-existing,
+already-completed repositories and services:
 
     * ``ClientRepository`` (AUTH-002/CLIENT-001/CLIENT-002) for the
-      client summary.
+      client summary and, as of DASH-004, the Client Management pages.
     * ``DeploymentRepository`` (DEPLOY-001..004) for the deployment
-      summary and, as of DASH-002, the deployment-target detail list.
+      summary and, as of DASH-002, the deployment-target detail list
+      (also reused by DASH-004's Client Detail page for a single
+      client's deployment history).
     * ``RepositoryPackageRepository`` (INV-002/REP-001/REP-002) for the
       repository summary.
     * ``AuditLogRepository`` (CORE-002) for the Audit Log Viewer
       (DASH-003), used here purely for reads - the write path used by
       every other ticket to record events is untouched.
+    * ``SoftwareInventoryRepository`` (INV-001), used as of DASH-004
+      purely to read each inventory record's ``install_date`` for
+      display - see the design note on ``get_client_software`` below for
+      why this repository is consulted directly rather than extending
+      ``VersionComparisonService``.
+    * ``VersionComparisonService`` (INV-002/UPDATE-001), used as of
+      DASH-004 to compute the Client Software page's per-item FR-007
+      status - reused unmodified; this ticket introduces no second
+      version-comparison implementation.
 
 No new database table, column, or migration is introduced - every figure
 below is derived entirely from existing columns.
@@ -63,12 +74,20 @@ from sqlalchemy.orm import Session
 
 from backend.core.config import Settings, get_settings
 from backend.models.client import Client
-from backend.models.enums import ApprovalStatus, ClientStatus, DeploymentStatus
+from backend.models.enums import ApprovalStatus, ClientStatus, DeploymentStatus, UpdateStatus
 from backend.repositories.audit_log_repository import AuditLogRepository
 from backend.repositories.client_repository import ClientRepository
 from backend.repositories.deployment_repository import DeploymentRepository
 from backend.repositories.repository_package_repository import RepositoryPackageRepository
+from backend.repositories.software_inventory_repository import SoftwareInventoryRepository
 from backend.schemas.audit_log import AuditLogEntry, AuditLogListResponse
+from backend.schemas.client_dashboard import (
+    ClientDetailResponse,
+    ClientListItem,
+    ClientListResponse,
+    ClientSoftwareItem,
+    ClientSoftwareResponse,
+)
 from backend.schemas.dashboard import (
     ClientSummary,
     DashboardStatsResponse,
@@ -77,6 +96,9 @@ from backend.schemas.dashboard import (
     SystemOverview,
 )
 from backend.schemas.deployment_monitor import DeploymentMonitoringResponse, DeploymentTargetDetail
+from backend.schemas.updates import ClientUpdateStatusSummary
+from backend.services.version_comparison_service import VersionComparisonService
+from backend.repositories.system_configuration_repository import SystemConfigurationRepository
 
 logger = logging.getLogger(__name__)
 
@@ -97,17 +119,48 @@ class DashboardService:
         deployment_repository: DeploymentRepository | None = None,
         repository_package_repository: RepositoryPackageRepository | None = None,
         audit_log_repository: AuditLogRepository | None = None,
+        software_inventory_repository: SoftwareInventoryRepository | None = None,
+        version_comparison_service: VersionComparisonService | None = None,
+        system_configuration_repository: SystemConfigurationRepository | None = None,
         settings: Settings | None = None,
     ) -> None:
         self._clients = client_repository or ClientRepository()
         self._deployments = deployment_repository or DeploymentRepository()
         self._packages = repository_package_repository or RepositoryPackageRepository()
         self._audit_logs = audit_log_repository or AuditLogRepository()
+        self._inventory = software_inventory_repository or SoftwareInventoryRepository()
+        self._version_comparison = version_comparison_service or VersionComparisonService()
+        # SYS-001 - resolves the *effective* client heartbeat timeout
+        # (persisted override, else Settings default) used by
+        # `_effective_client_status` below, instead of that method
+        # reading `self._settings.CLIENT_HEARTBEAT_TIMEOUT_MINUTES`
+        # directly. Defaulted the same way every other repository above
+        # is, so `get_dashboard_service` (backend/api/dependencies.py)
+        # needs no changes to pick this up.
+        self._system_config = system_configuration_repository or SystemConfigurationRepository()
         self._settings = settings or get_settings()
 
     # --- Client summary -------------------------------------------------
 
-    def _effective_client_status(self, *, last_heartbeat: datetime | None, now: datetime) -> ClientStatus:
+    # AFTER:
+    def _resolve_heartbeat_timeout(self, db: Session) -> timedelta:
+        """
+        Resolve the *effective* client heartbeat timeout (SYS-001): a
+        persisted override if an administrator has saved one via the
+        Settings page, otherwise ``Settings.CLIENT_HEARTBEAT_TIMEOUT_MINUTES``.
+
+        Queried once per calling method (not once per client in a loop)
+        - every caller below resolves this a single time and passes the
+        result into ``_effective_client_status`` for every client it
+        classifies in that call.
+        """
+        row = self._system_config.get_current(db)
+        minutes = row.client_heartbeat_timeout_minutes if row is not None else self._settings.CLIENT_HEARTBEAT_TIMEOUT_MINUTES
+        return timedelta(minutes=minutes)
+
+    def _effective_client_status(
+        self, *, last_heartbeat: datetime | None, now: datetime, timeout: timedelta
+    ) -> ClientStatus:
         """
         Classify a client's *effective*, read-time status - see the
         module docstring's design note for why this is not simply
@@ -116,13 +169,19 @@ class DashboardService:
         ``last_heartbeat`` is stored as ``DateTime(timezone=True)``
         (``backend/models/client.py``), but SQLite - unlike PostgreSQL -
         does not actually preserve timezone information: SQLAlchemy
-        returns it as a naive ``datetime`` on this prototype's database.
+        returns it 
+as a naive ``datetime`` on this prototype's database.
         A naive value is therefore treated as UTC (the same convention
         used everywhere a timestamp is written in this codebase, e.g.
         ``ClientRepository.update_heartbeat``'s
         ``datetime.now(timezone.utc)``) before comparing it against the
         timezone-aware ``now``, to avoid ``TypeError: can't subtract
         offset-naive and offset-aware datetimes``.
+
+        ``timeout`` is resolved by the caller via
+        ``_resolve_heartbeat_timeout`` (SYS-001), rather than computed
+        here from ``self._settings`` directly, so a persisted override
+        takes effect without a restart.
         """
         if last_heartbeat is None:
             return ClientStatus.UNKNOWN
@@ -130,15 +189,16 @@ class DashboardService:
             last_heartbeat = last_heartbeat.replace(tzinfo=timezone.utc)
         timeout = timedelta(minutes=self._settings.CLIENT_HEARTBEAT_TIMEOUT_MINUTES)
         return ClientStatus.ONLINE if (now - last_heartbeat) <= timeout else ClientStatus.OFFLINE
-
+    # get_client_summary — AFTER:
     def get_client_summary(self, db: Session) -> ClientSummary:
         """Return registered-client counts by effective status (FR-014)."""
         clients = self._clients.list_all(db)
         now = datetime.now(timezone.utc)
+        timeout = self._resolve_heartbeat_timeout(db)
 
         online = offline = unknown = 0
         for client in clients:
-            effective = self._effective_client_status(last_heartbeat=client.last_heartbeat, now=now)
+            effective = self._effective_client_status(last_heartbeat=client.last_heartbeat, now=now, timeout=timeout)
             if effective is ClientStatus.ONLINE:
                 online += 1
             elif effective is ClientStatus.OFFLINE:
@@ -400,3 +460,204 @@ class DashboardService:
             overview.repository,
         )
         return overview
+
+    # --- Client management (DASH-004) --------------------------------------
+
+    def get_client_list(
+        self,
+        db: Session,
+        *,
+        search: Optional[str] = None,
+        status_filter: Optional[ClientStatus] = None,
+    ) -> ClientListResponse:
+        """
+        Return every registered client (Backlog DASH-004 - "Client
+        List"), optionally filtered by a case-insensitive hostname/IP
+        substring and/or by effective status.
+
+        Reuses ``ClientRepository.list_all`` (already used internally by
+        ``get_client_summary`` and ``list_clients_for_filter`` above) and
+        ``_effective_client_status`` (the same read-time heartbeat
+        classification DASH-001/DASH-002 already rely on) - no second
+        status algorithm is introduced. For a 10-20 client prototype
+        deployment (PRS Section 2.5 "Scalability Constraints"), filtering
+        every row in Python after a single unfiltered query is simpler
+        and adequately performant; this mirrors ``get_audit_logs``'s own
+        choice to keep filtering "in the simplest maintainable way" per
+        this ticket's explicit instruction, without introducing a new
+        paginated repository query for a dataset this small.
+        """
+        
+        clients = self._clients.list_all(db)
+        now = datetime.now(timezone.utc)
+        timeout = self._resolve_heartbeat_timeout(db)
+        needle = search.strip().lower() if search else None
+
+        items: List[ClientListItem] = []
+        for client in clients:
+            effective_status = self._effective_client_status(
+                last_heartbeat=client.last_heartbeat, now=now, timeout=timeout
+            )
+            if status_filter is not None and effective_status is not status_filter:
+                continue
+            if needle and needle not in f"{client.hostname} {client.ip_address}".lower():
+                continue
+
+            items.append(
+                ClientListItem(
+                    id=client.id,
+                    hostname=client.hostname,
+                    ip_address=client.ip_address,
+                    operating_system=client.operating_system,
+                    agent_version=client.agent_version,
+                    status=effective_status,
+                    last_heartbeat=client.last_heartbeat,
+                    registration_date=client.created_at,
+                )
+            )
+
+        items.sort(key=lambda item: item.hostname.lower())
+
+        logger.debug(
+            "Client list computed: filters(search=%s, status=%s) returned %s of %s client(s).",
+            search,
+            status_filter,
+            len(items),
+            len(clients),
+        )
+
+        return ClientListResponse(clients=items, total=len(items))
+
+    def get_client_detail(
+        self,
+        db: Session,
+        client_id: uuid.UUID,
+        *,
+        deployment_history_limit: int = 20,
+    ) -> Optional[ClientDetailResponse]:
+        """
+        Return a single client's detail payload (Backlog DASH-004 -
+        "Client Detail"), or ``None`` if ``client_id`` does not match any
+        registered client (the router translates that into a
+        dashboard-friendly 404 rather than a raw traceback, per this
+        ticket's error-handling requirements).
+
+        Deployment history is obtained by calling
+        ``get_deployment_monitoring`` above with the ``client_id`` filter
+        it already supports (added by DASH-002) - this method does not
+        query ``DeploymentRepository`` directly nor duplicate any
+        deployment-target query logic.
+        """
+        client = self._clients.get_by_id(db, client_id)
+        if client is None:
+            return None
+
+        now = datetime.now(timezone.utc)
+        timeout = self._resolve_heartbeat_timeout(db)
+        effective_status = self._effective_client_status(
+            last_heartbeat=client.last_heartbeat, now=now, timeout=timeout
+        )
+
+        monitoring = self.get_deployment_monitoring(db, client_id=client_id, limit=deployment_history_limit)
+
+        return ClientDetailResponse(
+            id=client.id,
+            agent_guid=client.agent_guid,
+            hostname=client.hostname,
+            ip_address=client.ip_address,
+            operating_system=client.operating_system,
+            agent_version=client.agent_version,
+            status=effective_status,
+            last_heartbeat=client.last_heartbeat,
+            registration_date=client.created_at,
+            deployment_targets=monitoring.targets,
+        )
+
+    def get_client_software(
+        self,
+        db: Session,
+        client_id: uuid.UUID,
+        *,
+        search: Optional[str] = None,
+        publisher: Optional[str] = None,
+    ) -> Optional[ClientSoftwareResponse]:
+        """
+        Return a single client's installed software with FR-007 update
+        status (Backlog DASH-004 - "Client Software / Inventory"), or
+        ``None`` if ``client_id`` does not match any registered client.
+
+        Reuses ``VersionComparisonService.compare_client_inventory``
+        (INV-002/UPDATE-001) unmodified for the actual FR-007
+        classification - no second comparison implementation is
+        introduced. That service's ``SoftwareUpdateStatus`` result does
+        not carry ``install_date`` (it has no reason to - see its module
+        docstring), so this method separately calls
+        ``SoftwareInventoryRepository.list_for_client`` (already used by
+        that same service internally) and merges each result's
+        ``install_date`` in by ``inventory_id``, purely for display. This
+        keeps ``version_comparison_service.py`` untouched, consistent
+        with this ticket's "do not modify ... unless genuinely required"
+        constraint.
+
+        ``search``/``publisher`` filter the returned ``items`` list
+        (case-insensitive substring match); ``summary`` always reflects
+        the client's *entire* installed software set, unaffected by
+        those filters - the same convention ``get_deployment_monitoring``
+        already established for its own summary vs. filtered target list.
+        """
+        client = self._clients.get_by_id(db, client_id)
+        if client is None:
+            return None
+
+        comparison_results = self._version_comparison.compare_client_inventory(db, client_id=client_id)
+        inventory_records = self._inventory.list_for_client(db, client_id)
+        install_dates = {record.id: record.install_date for record in inventory_records}
+
+        name_needle = search.strip().lower() if search else None
+        publisher_needle = publisher.strip().lower() if publisher else None
+
+        items: List[ClientSoftwareItem] = []
+        for result in comparison_results:
+            if name_needle and name_needle not in result.software_name.lower():
+                continue
+            if publisher_needle and publisher_needle not in (result.publisher or "").lower():
+                continue
+
+            items.append(
+                ClientSoftwareItem(
+                    inventory_id=result.inventory_id,
+                    software_name=result.software_name,
+                    installed_version=result.installed_version,
+                    publisher=result.publisher,
+                    install_date=install_dates.get(result.inventory_id),
+                    status=result.status,
+                    approved_version=result.approved_version,
+                    repository_package_id=result.repository_package_id,
+                )
+            )
+
+        items.sort(key=lambda item: item.software_name.lower())
+
+        summary = ClientUpdateStatusSummary(
+            up_to_date=sum(1 for r in comparison_results if r.status == UpdateStatus.UP_TO_DATE),
+            update_available=sum(1 for r in comparison_results if r.status == UpdateStatus.UPDATE_AVAILABLE),
+            not_managed=sum(1 for r in comparison_results if r.status == UpdateStatus.NOT_MANAGED),
+            total=len(comparison_results),
+        )
+
+        logger.debug(
+            "Client software computed for client %s: filters(search=%s, publisher=%s) returned %s of %s "
+            "item(s).",
+            client_id,
+            search,
+            publisher,
+            len(items),
+            len(comparison_results),
+        )
+
+        return ClientSoftwareResponse(
+            client_id=client.id,
+            client_hostname=client.hostname,
+            items=items,
+            summary=summary,
+        )

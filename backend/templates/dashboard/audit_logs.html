@@ -32,11 +32,11 @@
 <div class="card shadow-sm mb-3">
     <div class="card-body">
         <form method="get" action="/dashboard/audit-logs" class="row g-2 align-items-end"
-      onsubmit="this.querySelectorAll('select').forEach(function(select) {
-          if (select.value === '') {
-              select.removeAttribute('name');
-          }
-      });">
+      onsubmit="this.querySelectorAll('select, input[type=date]').forEach(function(field) {
+    if (field.value === '') {
+        field.removeAttribute('name');
+    }
+});">
             <div class="col-sm-2">
                 <label for="eventTypeFilter" class="form-label small mb-1">Event Type</label>
                 <select id="eventTypeFilter" name="event_type" class="form-select form-select-sm">

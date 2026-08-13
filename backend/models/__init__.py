@@ -21,6 +21,7 @@ from backend.models.deployment import Deployment
 from backend.models.deployment_target import DeploymentTarget
 from backend.models.repository_package import RepositoryPackage
 from backend.models.software_inventory import SoftwareInventory
+from backend.models.system_configuration import SystemConfiguration
 
 __all__ = [
     "Base",
@@ -33,4 +34,5 @@ __all__ = [
     "DeploymentTarget",
     "RepositoryPackage",
     "SoftwareInventory",
+    "SystemConfiguration",
 ]

@@ -30,6 +30,7 @@ from backend.services.heartbeat_service import HeartbeatService
 from backend.services.inventory_service import InventoryService
 from backend.services.repository_service import RepositoryService
 from backend.services.version_comparison_service import VersionComparisonService
+from backend.services.system_configuration_service import SystemConfigurationService
 
 logger = logging.getLogger(__name__)
 
@@ -41,17 +42,41 @@ SettingsDependency = Annotated[Settings, Depends(get_settings)]
 # (CPM-002) into any route or service that declares `DBSessionDependency`.
 DBSessionDependency = Annotated[Session, Depends(get_db)]
 
-
-def get_auth_service(settings: SettingsDependency) -> AuthService:
+def get_system_configuration_service() -> SystemConfigurationService:
     """
-    Build an ``AuthService`` configured from the current application
-    settings (session inactivity timeout - FR-018 / NFR-028).
+    Build a ``SystemConfigurationService`` (SYS-001 - FR-018 system
+    configuration business logic). Stateless, like every other service
+    constructed here.
+    """
+    return SystemConfigurationService()
+
+
+# Reusable, typed dependency: injects a configured `SystemConfigurationService`.
+SystemConfigurationServiceDependency = Annotated[
+    SystemConfigurationService, Depends(get_system_configuration_service)
+]
+
+# AFTER:
+def get_auth_service(
+    settings: SettingsDependency,
+    db: DBSessionDependency,
+    config_service: SystemConfigurationServiceDependency,
+) -> AuthService:
+    """
+    Build an ``AuthService`` configured from the current *effective*
+    administrator session timeout (SYS-001): a persisted override if an
+    administrator has saved one via the Settings page, otherwise the
+    environment-sourced ``Settings.SESSION_INACTIVITY_TIMEOUT_MINUTES``
+    default (see ``SystemConfigurationService.get_effective_settings``).
 
     A new, stateless ``AuthService`` instance is constructed per request;
     it holds no per-request state itself (the database ``Session`` is
-    passed into each method call), so this has no measurable cost.
+    passed into each method call), so this has no measurable cost beyond
+    the one extra ``SELECT`` already required to resolve the effective
+    timeout.
     """
-    return AuthService(session_timeout=timedelta(minutes=settings.SESSION_INACTIVITY_TIMEOUT_MINUTES))
+    effective = config_service.get_effective_settings(db, settings)
+    return AuthService(session_timeout=timedelta(minutes=effective.session_inactivity_timeout_minutes))
 
 
 # Reusable, typed dependency: injects a configured `AuthService`.

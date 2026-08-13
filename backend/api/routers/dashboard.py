@@ -1,6 +1,7 @@
 """
 Dashboard router (Backlog DASH-001 - "Dashboard Home"; DASH-002 -
-"Deployment Monitoring"; DASH-003 - "Audit Log Viewer").
+"Deployment Monitoring"; DASH-003 - "Audit Log Viewer"; DASH-004 -
+"Client Management Dashboard").
 
 Implements the administrator-facing Dashboard Home overview: system
 statistics, client summary, deployment summary, and repository summary
@@ -56,6 +57,26 @@ Three related HTML pages and two JSON endpoints are exposed:
       counterpart of the page above, grouped under ``/api/admin``
       alongside the other Dashboard Module JSON endpoints. Read-only, so
       it likewise requires only an active administrator session.
+    * ``GET /dashboard/clients`` (DASH-004) - the Client List page: every
+      registered client, with effective status (FR-014), optionally
+      filtered by a hostname/IP substring and/or status. Uses the exact
+      same session-cookie/redirect-to-``/login`` pattern as the pages
+      above.
+    * ``GET /dashboard/clients/{client_id}`` (DASH-004) - the Client
+      Detail page: one client's identifying/status information plus its
+      recent deployment history, reusing ``get_deployment_monitoring``
+      (DASH-002) filtered by ``client_id`` - no deployment query logic is
+      duplicated. Renders a dashboard-friendly 404 page (not a raw
+      traceback) if ``client_id`` is unknown.
+    * ``GET /dashboard/clients/{client_id}/software`` (DASH-004) - the
+      Client Software page: a client's installed software with its
+      FR-007 update status, reusing ``VersionComparisonService.
+      compare_client_inventory`` unmodified. Same 404 handling as above.
+    * ``GET /api/admin/dashboard/clients``, ``GET
+      /api/admin/dashboard/clients/{client_id}``, and ``GET
+      /api/admin/dashboard/clients/{client_id}/software`` (DASH-004) -
+      JSON counterparts of the three pages above, grouped under
+      ``/api/admin`` alongside the other Dashboard Module JSON endpoints.
 
 The HTML pages and their JSON counterparts both call the same
 ``DashboardService`` methods directly (no internal HTTP call), so there
@@ -76,15 +97,24 @@ from fastapi.templating import Jinja2Templates
 
 from backend.api.dependencies import (
     AuthServiceDependency,
+    CSRFProtection,
     CurrentAdministrator,
     DBSessionDependency,
     DashboardServiceDependency,
+    RepositoryServiceDependency,
     SettingsDependency,
+    SystemConfigurationServiceDependency,
 )
+from backend.schemas.system_configuration import SystemConfigurationUpdateRequest 
+from backend.api.routers.updates import ClientNotFoundError
 from backend.core.config import BASE_DIR
 from backend.models.administrator import Administrator
-from backend.models.enums import DeploymentStatus
+from backend.models.enums import ApprovalStatus, ClientStatus, DeploymentStatus, UpdateStatus
 from backend.services.auth_service import AuthenticationError
+from backend.services.repository_service import RepositoryPackageNotFoundError
+from backend.api.dependencies import SystemConfigurationServiceDependency  # add to existing import group
+from backend.schemas.system_configuration import SystemConfigurationUpdateRequest
+
 
 logger = logging.getLogger(__name__)
 
@@ -137,6 +167,38 @@ _SEVERITY_BADGE_CLASS: Dict[str, str] = {
 def _severity_badge_class(severity: str) -> str:
     """Bootstrap badge class for an audit log entry's ``severity`` (DASH-003)."""
     return _SEVERITY_BADGE_CLASS.get(severity.upper(), "text-bg-light text-dark border")
+
+
+# Bootstrap badge classes for FR-007 update status (DASH-004 - "Expected
+# status presentation: Up to Date (green badge), Update Available
+# (yellow badge), Not Managed (gray badge)"). Keyed by enum member
+# *name*, matching the convention already established by
+# ``_STATUS_BADGE_CLASS`` above.
+_UPDATE_STATUS_BADGE_CLASS: Dict[str, str] = {
+    "UP_TO_DATE": "text-bg-success",
+    "UPDATE_AVAILABLE": "text-bg-warning text-dark",
+    "NOT_MANAGED": "text-bg-secondary",
+}
+
+
+def _update_status_badge_class(update_status: UpdateStatus) -> str:
+    """Bootstrap badge class for a software item's FR-007 ``UpdateStatus`` (DASH-004)."""
+    return _UPDATE_STATUS_BADGE_CLASS.get(update_status.name, "text-bg-light text-dark border")
+
+
+# Bootstrap badge classes for a repository package's FR-006/FR-017
+# ``ApprovalStatus`` (DASH-005 - "Package status is visible"). Keyed by
+# enum member *name*, matching the convention already established by
+# ``_STATUS_BADGE_CLASS``/``_UPDATE_STATUS_BADGE_CLASS`` above.
+_APPROVAL_STATUS_BADGE_CLASS: Dict[str, str] = {
+    "APPROVED": "text-bg-success",
+    "INACTIVE": "text-bg-secondary",
+}
+
+
+def _approval_status_badge_class(approval_status: ApprovalStatus) -> str:
+    """Bootstrap badge class for a repository package's ``ApprovalStatus`` (DASH-005)."""
+    return _APPROVAL_STATUS_BADGE_CLASS.get(approval_status.name, "text-bg-light text-dark border")
 
 
 def _resolve_administrator_or_none(
@@ -498,4 +560,533 @@ async def get_audit_logs(
         "success": True,
         "message": "Audit log entries retrieved.",
         "data": result.model_dump(mode="json"),
+    }
+
+
+# --- Client Management (DASH-004) -------------------------------------
+
+
+@router.get(
+    "/dashboard/clients",
+    response_class=HTMLResponse,
+    response_model=None,
+    include_in_schema=False,
+)
+async def client_list_page(
+    request: Request,
+    db: DBSessionDependency,
+    auth_service: AuthServiceDependency,
+    settings: SettingsDependency,
+    dashboard_service: DashboardServiceDependency,
+    search: Optional[str] = Query(default=None),
+    status_filter: Optional[ClientStatus] = Query(default=None, alias="status"),
+) -> HTMLResponse | RedirectResponse:
+    """
+    Render the Client List page (Backlog DASH-004 - "Client List"):
+    every registered client, with effective status (FR-014), optionally
+    filtered by a case-insensitive hostname/IP substring and/or status.
+
+    ``search``/``status`` are optional query-string filters (e.g.
+    ``/dashboard/clients?status=Offline``), mirroring the query-param
+    convention already established by ``deployment_monitoring_page``.
+
+    Redirects to ``/login`` if no valid administrator session is present,
+    identical to every other dashboard page route above.
+    """
+    administrator = _resolve_administrator_or_none(request, db, auth_service, settings)
+    if administrator is None:
+        return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+
+    result = dashboard_service.get_client_list(db, search=search or None, status_filter=status_filter)
+
+    return templates.TemplateResponse(
+        request,
+        "dashboard/clients.html",
+        {
+            "administrator": administrator,
+            "result": result,
+            "statuses": list(ClientStatus),
+            "selected_search": search,
+            "selected_status": status_filter,
+        },
+    )
+
+
+@router.get(
+    "/api/admin/dashboard/clients",
+    status_code=status.HTTP_200_OK,
+    summary="Client list",
+    description=(
+        "Return every registered client (Backlog DASH-004), with effective status (FR-014), optionally "
+        "filtered by a case-insensitive hostname/IP substring and/or status."
+    ),
+)
+async def get_client_list(
+    db: DBSessionDependency,
+    dashboard_service: DashboardServiceDependency,
+    current_admin: CurrentAdministrator,
+    search: Optional[str] = Query(default=None, description="Case-insensitive hostname/IP substring filter."),
+    status_filter: Optional[ClientStatus] = Query(
+        default=None, alias="status", description="Filter by effective client status."
+    ),
+) -> Dict[str, Any]:
+    """Return the Client List data as JSON (standard CPMS envelope)."""
+    result = dashboard_service.get_client_list(db, search=search, status_filter=status_filter)
+    logger.debug("Administrator %s requested client list (search=%s, status=%s).", current_admin.id, search, status_filter)
+    return {
+        "success": True,
+        "message": "Client list retrieved.",
+        "data": result.model_dump(mode="json"),
+    }
+
+
+@router.get(
+    "/dashboard/clients/{client_id}",
+    response_class=HTMLResponse,
+    response_model=None,
+    include_in_schema=False,
+)
+async def client_detail_page(
+    request: Request,
+    client_id: uuid.UUID,
+    db: DBSessionDependency,
+    auth_service: AuthServiceDependency,
+    settings: SettingsDependency,
+    dashboard_service: DashboardServiceDependency,
+) -> HTMLResponse | RedirectResponse:
+    """
+    Render the Client Detail page (Backlog DASH-004 - "Client Detail"):
+    a single client's identifying/status information plus its recent
+    deployment history (reused from DASH-002 via
+    ``DashboardService.get_client_detail`` -> ``get_deployment_monitoring``
+    filtered by ``client_id``; no deployment query logic is duplicated
+    here).
+
+    Renders a dashboard-friendly 404 page (not a raw traceback or bare
+    JSON body) if ``client_id`` does not match any registered client.
+
+    Redirects to ``/login`` if no valid administrator session is present,
+    identical to every other dashboard page route above.
+    """
+    administrator = _resolve_administrator_or_none(request, db, auth_service, settings)
+    if administrator is None:
+        return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+
+    detail = dashboard_service.get_client_detail(db, client_id)
+    if detail is None:
+        return templates.TemplateResponse(
+            request,
+            "dashboard/not_found.html",
+            {
+                "administrator": administrator,
+                "message": f"No client was found with id {client_id}.",
+                "back_url": "/dashboard/clients",
+                "back_label": "Back to Clients",
+            },
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
+
+    rows = [
+        {
+            "target": target,
+            "badge_class": _status_badge_class(target.status),
+            "label": _status_label(target.status),
+        }
+        for target in detail.deployment_targets
+    ]
+
+    return templates.TemplateResponse(
+        request,
+        "dashboard/client_detail.html",
+        {
+            "administrator": administrator,
+            "detail": detail,
+            "rows": rows,
+        },
+    )
+
+
+@router.get(
+    "/api/admin/dashboard/clients/{client_id}",
+    status_code=status.HTTP_200_OK,
+    summary="Client detail",
+    description=(
+        "Return a single client's detail, including its recent deployment history (Backlog DASH-004)."
+    ),
+)
+async def get_client_detail(
+    client_id: uuid.UUID,
+    db: DBSessionDependency,
+    dashboard_service: DashboardServiceDependency,
+    current_admin: CurrentAdministrator,
+) -> Dict[str, Any]:
+    """
+    Return a single client's detail data as JSON (standard CPMS
+    envelope). Raises ``ClientNotFoundError`` (404) if ``client_id`` does
+    not match any registered client - the same exception, and the same
+    404 semantics, already used by ``GET
+    /api/admin/clients/{client_id}/updates`` (``backend/api/routers/
+    updates.py``), reused here rather than redefined.
+    """
+    detail = dashboard_service.get_client_detail(db, client_id)
+    if detail is None:
+        raise ClientNotFoundError(client_id)
+
+    logger.debug("Administrator %s requested client detail for %s.", current_admin.id, client_id)
+    return {
+        "success": True,
+        "message": "Client detail retrieved.",
+        "data": detail.model_dump(mode="json"),
+    }
+
+
+@router.get(
+    "/dashboard/clients/{client_id}/software",
+    response_class=HTMLResponse,
+    response_model=None,
+    include_in_schema=False,
+)
+async def client_software_page(
+    request: Request,
+    client_id: uuid.UUID,
+    db: DBSessionDependency,
+    auth_service: AuthServiceDependency,
+    settings: SettingsDependency,
+    dashboard_service: DashboardServiceDependency,
+    search: Optional[str] = Query(default=None),
+    publisher: Optional[str] = Query(default=None),
+) -> HTMLResponse | RedirectResponse:
+    """
+    Render the Client Software page (Backlog DASH-004 - "Client Software
+    / Inventory"): every installed software item for a client, with its
+    FR-007 update status, reusing ``VersionComparisonService.
+    compare_client_inventory`` unmodified via
+    ``DashboardService.get_client_software`` - no second version-
+    comparison implementation is introduced by this ticket.
+
+    ``search``/``publisher`` are optional query-string filters over the
+    software name and publisher, respectively (case-insensitive
+    substring match).
+
+    Renders a dashboard-friendly 404 page if ``client_id`` does not match
+    any registered client. Redirects to ``/login`` if no valid
+    administrator session is present, identical to every other dashboard
+    page route above.
+    """
+    administrator = _resolve_administrator_or_none(request, db, auth_service, settings)
+    if administrator is None:
+        return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+
+    software = dashboard_service.get_client_software(
+        db,
+        client_id,
+        search=search or None,
+        publisher=publisher or None,
+    )
+    if software is None:
+        return templates.TemplateResponse(
+            request,
+            "dashboard/not_found.html",
+            {
+                "administrator": administrator,
+                "message": f"No client was found with id {client_id}.",
+                "back_url": "/dashboard/clients",
+                "back_label": "Back to Clients",
+            },
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
+
+    rows = [
+        {"item": item, "badge_class": _update_status_badge_class(item.status)} for item in software.items
+    ]
+
+    return templates.TemplateResponse(
+        request,
+        "dashboard/client_software.html",
+        {
+            "administrator": administrator,
+            "software": software,
+            "rows": rows,
+            "selected_search": search,
+            "selected_publisher": publisher,
+        },
+    )
+
+
+@router.get(
+    "/api/admin/dashboard/clients/{client_id}/software",
+    status_code=status.HTTP_200_OK,
+    summary="Client software inventory with FR-007 update status",
+    description=(
+        "Return a client's installed software with FR-007 update status (Backlog DASH-004), optionally "
+        "filtered by a case-insensitive software-name and/or publisher substring."
+    ),
+)
+async def get_client_software(
+    client_id: uuid.UUID,
+    db: DBSessionDependency,
+    dashboard_service: DashboardServiceDependency,
+    current_admin: CurrentAdministrator,
+    search: Optional[str] = Query(default=None, description="Case-insensitive software-name substring filter."),
+    publisher: Optional[str] = Query(default=None, description="Case-insensitive publisher substring filter."),
+) -> Dict[str, Any]:
+    """
+    Return a client's software inventory + FR-007 update status as JSON
+    (standard CPMS envelope). Raises ``ClientNotFoundError`` (404) if
+    ``client_id`` does not match any registered client.
+    """
+    software = dashboard_service.get_client_software(db, client_id, search=search, publisher=publisher)
+    if software is None:
+        raise ClientNotFoundError(client_id)
+
+    logger.debug(
+        "Administrator %s requested software inventory for client %s (search=%s, publisher=%s).",
+        current_admin.id,
+        client_id,
+        search,
+        publisher,
+    )
+    return {
+        "success": True,
+        "message": "Client software inventory retrieved.",
+        "data": software.model_dump(mode="json"),
+    }
+
+
+# --- Repository Package Browser (DASH-005) ------------------------------
+
+
+@router.get(
+    "/dashboard/repository",
+    response_class=HTMLResponse,
+    response_model=None,
+    include_in_schema=False,
+)
+async def repository_list_page(
+    request: Request,
+    db: DBSessionDependency,
+    auth_service: AuthServiceDependency,
+    settings: SettingsDependency,
+    repository_service: RepositoryServiceDependency,
+    search: Optional[str] = Query(default=None),
+    status_filter: Optional[ApprovalStatus] = Query(default=None, alias="status"),
+) -> HTMLResponse | RedirectResponse:
+    """
+    Render the Repository Package Browser list page (Backlog DASH-005 -
+    "Repository Package List"): every repository package (FR-006),
+    optionally filtered by a case-insensitive software-name/version
+    substring and/or approval status.
+
+    Reuses ``RepositoryService.list_packages`` (REP-001/REP-002)
+    unmodified - the exact same method already backing the existing
+    ``GET /api/admin/repository/packages`` JSON endpoint
+    (``backend/api/routers/repository.py``) - so no repository query
+    logic is duplicated by this ticket. ``RepositoryServiceDependency``
+    is injected directly (rather than via a new ``DashboardService``
+    passthrough method), consistent with this ticket's "prefer reusing
+    ... rather than creating parallel repository/service classes"
+    constraint and the architecture note that the router may sit atop
+    "DashboardService / existing Service" interchangeably.
+
+    ``search``/``status`` are optional query-string filters (e.g.
+    ``/dashboard/repository?status=Inactive``), mirroring the query-param
+    convention already established by ``client_list_page``.
+
+    Redirects to ``/login`` if no valid administrator session is present,
+    identical to every other dashboard page route above.
+    """
+    administrator = _resolve_administrator_or_none(request, db, auth_service, settings)
+    if administrator is None:
+        return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+
+    packages = repository_service.list_packages(db, search=search or None, approval_status=status_filter)
+
+    rows = [
+        {"package": package, "badge_class": _approval_status_badge_class(package.approval_status)}
+        for package in packages
+    ]
+
+    return templates.TemplateResponse(
+        request,
+        "dashboard/repository.html",
+        {
+            "administrator": administrator,
+            "rows": rows,
+            "total": len(packages),
+            "statuses": list(ApprovalStatus),
+            "selected_search": search,
+            "selected_status": status_filter,
+        },
+    )
+
+
+@router.get(
+    "/dashboard/repository/{package_id}",
+    response_class=HTMLResponse,
+    response_model=None,
+    include_in_schema=False,
+)
+async def repository_detail_page(
+    request: Request,
+    package_id: uuid.UUID,
+    db: DBSessionDependency,
+    auth_service: AuthServiceDependency,
+    settings: SettingsDependency,
+    repository_service: RepositoryServiceDependency,
+    deactivated: bool = Query(default=False),
+) -> HTMLResponse | RedirectResponse:
+    """
+    Render the Repository Package Detail page (Backlog DASH-005 -
+    "Package Detail"): a single package's full metadata (FR-006 Repository
+    Metadata), plus a Deactivate action.
+
+    The Deactivate button (see ``dashboard/repository_detail.html``) posts
+    directly, via client-side JavaScript, to the existing, already-secured
+    ``POST /api/admin/repository/packages/{package_id}/deactivate``
+    endpoint (REP-002/FR-017) - carrying the same administrator session
+    cookie and ``X-CSRF-Token`` header (NFR-028) every other state-changing
+    dashboard action already requires. No second deactivation mechanism,
+    and no new state-changing route, is introduced by this ticket.
+
+    Renders a dashboard-friendly 404 page (not a raw JSON body) if
+    ``package_id`` does not match any repository package, by catching
+    ``RepositoryPackageNotFoundError`` here - the same exception (and the
+    same 404 semantics) already raised by ``RepositoryService.get_package``
+    for the existing ``GET /api/admin/repository/packages/{package_id}``
+    JSON endpoint - rather than letting the global ``AppException`` JSON
+    handler produce a bare JSON body for what is otherwise an HTML page
+    request.
+
+    ``deactivated=1`` (set by the client-side redirect after a successful
+    deactivation) renders a one-time success banner.
+
+    Redirects to ``/login`` if no valid administrator session is present,
+    identical to every other dashboard page route above.
+    """
+    administrator = _resolve_administrator_or_none(request, db, auth_service, settings)
+    if administrator is None:
+        return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+
+    try:
+        package = repository_service.get_package(db, package_id)
+    except RepositoryPackageNotFoundError:
+        return templates.TemplateResponse(
+            request,
+            "dashboard/not_found.html",
+            {
+                "administrator": administrator,
+                "message": f"No repository package was found with id {package_id}.",
+                "back_url": "/dashboard/repository",
+                "back_label": "Back to Repository",
+            },
+            status_code=status.HTTP_404_NOT_FOUND,
+        )
+
+    return templates.TemplateResponse(
+        request,
+        "dashboard/repository_detail.html",
+        {
+            "administrator": administrator,
+            "package": package,
+            "badge_class": _approval_status_badge_class(package.approval_status),
+            "deactivated": deactivated,
+        },
+    )
+# --- System Configuration (SYS-001) ---------------------------------------
+#
+# Append these two routes to the end of backend/api/routers/dashboard.py,
+# after the DASH-005 repository_detail_page route. Add the two imports
+# noted above to the top of the file first.
+
+
+@router.get(
+    "/dashboard/settings",
+    response_class=HTMLResponse,
+    response_model=None,
+    include_in_schema=False,
+)
+async def settings_page(
+    request: Request,
+    db: DBSessionDependency,
+    auth_service: AuthServiceDependency,
+    settings: SettingsDependency,
+    config_service: SystemConfigurationServiceDependency,
+    saved: bool = Query(default=False),
+) -> HTMLResponse | RedirectResponse:
+    """
+    Render the System Configuration ("Settings") page (SYS-001 - FR-018
+    System Configuration Management): the current effective value of
+    every SYS-001-managed setting, editable and saved via
+    ``POST /api/admin/settings`` below.
+
+    Uses the exact same session-cookie/redirect-to-``/login`` pattern as
+    every other dashboard page route in this file. ``saved=1`` (set by
+    the client-side redirect after a successful save, the same
+    convention already used by ``repository_detail_page``'s
+    ``deactivated=1``) renders a one-time success banner.
+    """
+    administrator = _resolve_administrator_or_none(request, db, auth_service, settings)
+    if administrator is None:
+        return RedirectResponse(url="/login", status_code=status.HTTP_302_FOUND)
+
+    values = config_service.get_effective_settings(db, settings)
+
+    return templates.TemplateResponse(
+        request,
+        "dashboard/settings.html",
+        {
+            "administrator": administrator,
+            "values": values,
+            "saved": saved,
+        },
+    )
+
+
+@router.post(
+    "/api/admin/settings",
+    status_code=status.HTTP_200_OK,
+    summary="Update system configuration",
+    description=(
+        "Validate and persist the CPMS system configuration values managed by SYS-001 (FR-018): "
+        "administrator session timeout, client heartbeat timeout, and maximum installer upload size. "
+        "Records an audit log entry describing what changed."
+    ),
+)
+async def update_settings(
+    request: SystemConfigurationUpdateRequest,
+    db: DBSessionDependency,
+    settings: SettingsDependency,
+    config_service: SystemConfigurationServiceDependency,
+    current_admin: CurrentAdministrator,
+    _csrf: CSRFProtection,
+) -> Dict[str, Any]:
+    """
+    Persist a new set of SYS-001-managed setting values (FR-018).
+
+    Requires both an active administrator session and a valid CSRF token
+    (NFR-028), the same pattern used by every other state-changing
+    administrator endpoint in this codebase (e.g.
+    ``POST /api/admin/repository/packages/{package_id}/deactivate``).
+    Field-level validation (positive integers, sensible upper bounds) is
+    enforced by ``SystemConfigurationUpdateRequest`` before this handler
+    runs; FastAPI returns 422 automatically for values outside those
+    bounds, so no explicit validation-error branch is needed here.
+    """
+    previous = config_service.get_effective_settings(db, settings)
+    updated = config_service.update_settings(
+        db,
+        admin_id=current_admin.id,
+        request=request,
+        previous=previous,
+    )
+
+    logger.info(
+        "Administrator %s updated system configuration via /api/admin/settings.",
+        current_admin.id,
+    )
+
+    return {
+        "success": True,
+        "message": "Configuration saved successfully.",
+        "data": updated.model_dump(mode="json"),
     }
