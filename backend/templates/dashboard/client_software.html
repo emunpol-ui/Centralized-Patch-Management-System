@@ -13,6 +13,8 @@
     </div>
 </div>
 
+<div id="updateAlert" class="alert d-none" role="alert"></div>
+
 <div class="row g-3 mb-3">
     <div class="col-sm-6 col-lg-3">
         <div class="card h-100 shadow-sm">
@@ -91,6 +93,7 @@
                         <th>Install Date</th>
                         <th>Status</th>
                         <th>Approved Version</th>
+                        <th>Action</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -120,10 +123,24 @@
                                 &mdash;
                             {% endif %}
                         </td>
+                        <td>
+                            {% if row.item.status.name == "UPDATE_AVAILABLE" and row.item.repository_package_id %}
+                            <button
+                                type="button"
+                                class="btn btn-sm btn-primary update-btn"
+                                data-client-id="{{ software.client_id }}"
+                                data-repository-package-id="{{ row.item.repository_package_id }}"
+                                data-software-name="{{ row.item.software_name }}"
+                                data-approved-version="{{ row.item.approved_version }}"
+                            >Update</button>
+                            {% else %}
+                            <span class="text-muted small">&mdash;</span>
+                            {% endif %}
+                        </td>
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="6" class="text-center text-muted py-4">
+                        <td colspan="7" class="text-center text-muted py-4">
                             No software inventory has been collected for this client yet.
                         </td>
                     </tr>
@@ -133,4 +150,8 @@
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script src="/static/js/client_software.js"></script>
 {% endblock %}

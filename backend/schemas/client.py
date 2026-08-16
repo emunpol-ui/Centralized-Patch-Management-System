@@ -13,6 +13,7 @@ from __future__ import annotations
 import ipaddress
 import uuid
 
+
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -29,14 +30,20 @@ class ClientRegistrationRequest(BaseModel):
 
     agent_guid: uuid.UUID = Field(..., description="Persistent identifier generated locally by the Client Agent.")
     hostname: str = Field(..., max_length=255, description="Windows computer name.")
+    logged_in_user: str | None = Field(
+        default=None,
+        max_length=255,
+        description="Windows user currently logged into the client.",
+    )
     ip_address: str = Field(..., max_length=45, description="Client network address (IPv4 or IPv6).")
     operating_system: str = Field(..., max_length=100, description="Windows version.")
     agent_version: str = Field(..., max_length=50, description="Installed CPMS Agent version.")
+    
 
-    @field_validator("hostname", "operating_system", "agent_version")
+    @field_validator("hostname", "operating_system", "agent_version", "logged_in_user")
     @classmethod
-    def not_blank(cls, value: str) -> str:
-        if not value or not value.strip():
+    def not_blank(cls, value: str | None) -> str | None:
+        if value is not None and not value.strip():
             raise ValueError("must not be empty")
         return value
 

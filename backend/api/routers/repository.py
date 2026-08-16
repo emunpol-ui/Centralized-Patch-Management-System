@@ -58,6 +58,7 @@ from backend.schemas.repository import (
     RepositoryPackageResponse,
     RepositoryPackageUploadMetadata,
 )
+from backend.api.dependencies import SystemConfigurationServiceDependency
 
 logger = logging.getLogger(__name__)
 
@@ -93,11 +94,12 @@ async def upload_repository_package(
     db: DBSessionDependency,
     repository_service: RepositoryServiceDependency,
     settings: SettingsDependency,
+    config_service: SystemConfigurationServiceDependency,
     current_admin: CurrentAdministrator,
     _csrf: CSRFProtection,
     installer: UploadFile = File(..., description="The installer package file (.exe or .msi)."),
-    software_name: str = Form(..., description="Approved software name."),
-    version: str = Form(..., description="Approved software version."),
+    software_name: str = Form(..., description="Approved software name (RepositoryPackage.software_name)."),
+    version: str = Form(..., description="Approved software version (RepositoryPackage.version)."),
     installer_type: InstallerType = Form(..., description="Installer type: EXE or MSI."),
     silent_command: str = Form(
         ...,
@@ -124,6 +126,11 @@ async def upload_repository_package(
     except ValidationError as exc:
         raise RepositoryPackageMetadataError(exc) from exc
 
+    # AFTER:
+    # SYS-001 - use the effective (persisted-override-or-default)
+    # maximum upload size rather than the static environment default,
+    # so a saved override takes effect on the very next upload.
+    effective = config_service.get_effective_settings(db, settings)
     package = repository_service.upload_package(
         db,
         admin_id=current_admin.id,
@@ -134,7 +141,7 @@ async def upload_repository_package(
         original_filename=installer.filename,
         file_stream=installer.file,
         storage_dir=settings.repository_path,
-        max_size_bytes=settings.max_installer_upload_size_bytes,
+        max_size_bytes=effective.max_installer_upload_size_bytes,
     )
 
     response = RepositoryPackageResponse.model_validate(package)

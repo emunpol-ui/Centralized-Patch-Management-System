@@ -5,7 +5,9 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
     <div>
-        <h1 class="h3 mb-0">{{ detail.hostname }}</h1>
+       <h1 class="h3 mb-0">
+            {{ detail.hostname }}{% if detail.logged_in_user %} - {{ detail.logged_in_user }}{% endif %}
+        </h1>
         <p class="text-muted mb-0">Client details and recent deployment history.</p>
     </div>
     <div>
@@ -24,6 +26,12 @@
                         <tr>
                             <td>Hostname</td>
                             <td class="text-end fw-semibold">{{ detail.hostname }}</td>
+                        </tr>
+                        <tr>
+                        <td>Logged-in User</td>
+                             <td class="text-end fw-semibold">
+                                 {{ detail.logged_in_user or "—" }}
+                             </td>
                         </tr>
                         <tr>
                             <td>IP Address</td>

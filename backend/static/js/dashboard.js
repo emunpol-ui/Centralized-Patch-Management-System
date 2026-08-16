@@ -45,6 +45,7 @@ document.addEventListener("DOMContentLoaded", () => {
     // ---------------------------------------------------------------
     // Client provisioning
     // ---------------------------------------------------------------
+    const hostname = document.getElementById("clientHostname").value.trim();
 
     const generateButton = document.getElementById(
         "generateProvisioningKeyBtn"
@@ -127,10 +128,18 @@ document.addEventListener("DOMContentLoaded", () => {
             // Build the command using the server the administrator is
             // currently accessing. This avoids hardcoding the server IP.
             const serverUrl = window.location.origin;
+            const hostname = document.getElementById("clientHostname").value.trim();
+
+            if (!hostname) {
+                provisioningError.textContent = "Please enter a hostname.";
+                provisioningError.classList.remove("d-none");
+                return;
+            }
 
             const command = [
                 `$env:AGENT_API_KEY="${apiKey}"`,
                 `$env:AGENT_SERVER_URL="${serverUrl}"`,
+                `$env:AGENT_HOSTNAME="${hostname}"`,
                 "python -m agent.main",
             ].join("\n");
 

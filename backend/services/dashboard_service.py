@@ -507,6 +507,7 @@ as a naive ``datetime`` on this prototype's database.
                 ClientListItem(
                     id=client.id,
                     hostname=client.hostname,
+                    logged_in_user=client.logged_in_user,
                     ip_address=client.ip_address,
                     operating_system=client.operating_system,
                     agent_version=client.agent_version,
@@ -564,6 +565,7 @@ as a naive ``datetime`` on this prototype's database.
             id=client.id,
             agent_guid=client.agent_guid,
             hostname=client.hostname,
+            logged_in_user=client.logged_in_user,
             ip_address=client.ip_address,
             operating_system=client.operating_system,
             agent_version=client.agent_version,

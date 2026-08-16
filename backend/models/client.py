@@ -47,6 +47,7 @@ class Client(AuditModel):
     agent_guid: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), unique=True, nullable=False)
     api_key_hash: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     hostname: Mapped[str] = mapped_column(String(255), nullable=False)
+    logged_in_user: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     ip_address: Mapped[str] = mapped_column(String(45), nullable=False)
     operating_system: Mapped[str] = mapped_column(String(100), nullable=False)
     agent_version: Mapped[str] = mapped_column(String(50), nullable=False)
@@ -64,7 +65,7 @@ class Client(AuditModel):
     )
     deployment_targets: Mapped[List["DeploymentTarget"]] = relationship(
         back_populates="client",
-        cascade="save-update, merge",
+        cascade="all, delete-orphan",
     )
     audit_logs: Mapped[List["AuditLog"]] = relationship(
         back_populates="client",

@@ -98,6 +98,7 @@ from fastapi.templating import Jinja2Templates
 from backend.api.dependencies import (
     AuthServiceDependency,
     CSRFProtection,
+    ClientServiceDependency,
     CurrentAdministrator,
     DBSessionDependency,
     DashboardServiceDependency,
@@ -610,7 +611,41 @@ async def client_list_page(
             "selected_status": status_filter,
         },
     )
+@router.delete(
+    "/api/admin/dashboard/clients/{client_id}",
+    status_code=status.HTTP_200_OK,
+    summary="Delete client",
+)
+async def delete_client(
+    client_id: uuid.UUID,
+    db: DBSessionDependency,
+    client_service: ClientServiceDependency,
+    current_admin: CurrentAdministrator,
+    csrf: CSRFProtection,
+) -> Dict[str, Any]:
+    """
+    Permanently delete a registered client.
 
+    Administrator session + CSRF protected.
+    """
+    client_service.delete_client(
+        db,
+        client_id,
+    )
+
+    logger.info(
+        "Administrator %s deleted client %s.",
+        current_admin.id,
+        client_id,
+    )
+
+    return {
+        "success": True,
+        "message": "Client deleted successfully.",
+        "data": {
+            "client_id": str(client_id),
+        },
+    }
 
 @router.get(
     "/api/admin/dashboard/clients",

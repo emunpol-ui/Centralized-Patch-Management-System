@@ -88,6 +88,7 @@ async def register_client(
         credential=credential,
         agent_guid=payload.agent_guid,
         hostname=payload.hostname,
+        logged_in_user=payload.logged_in_user,
         ip_address=payload.ip_address,
         operating_system=payload.operating_system,
         agent_version=payload.agent_version,

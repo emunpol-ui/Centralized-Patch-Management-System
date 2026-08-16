@@ -24,6 +24,7 @@ import uuid
 
 from sqlalchemy.orm import Session
 
+
 from backend.core.exceptions import AppException
 from backend.models.client import Client
 from backend.models.enums import AuditSeverity, ClientStatus
@@ -45,7 +46,18 @@ class ClientRegistrationConflictError(AppException):
 
     def __init__(self, message: str = "Client registration conflict.", status_code: int = 409) -> None:
         super().__init__(message, status_code=status_code)
+class ClientNotFoundError(AppException):
+    """Raised when a requested client does not exist."""
 
+    def __init__(
+        self,
+        client_id: uuid.UUID,
+        status_code: int = 404,
+    ) -> None:
+        super().__init__(
+            f"Client '{client_id}' was not found.",
+            status_code=status_code,
+        )
 
 class ClientService:
     """
@@ -73,6 +85,7 @@ class ClientService:
         credential: RegistrationCredential,
         agent_guid: uuid.UUID,
         hostname: str,
+        logged_in_user: str | None,
         ip_address: str,
         operating_system: str,
         agent_version: str,
@@ -121,6 +134,7 @@ class ClientService:
                 db,
                 existing_by_guid,
                 hostname=hostname,
+                logged_in_user=logged_in_user,
                 ip_address=ip_address,
                 operating_system=operating_system,
                 agent_version=agent_version,
@@ -154,6 +168,7 @@ class ClientService:
             agent_guid=agent_guid,
             api_key_hash=credential.provisioning_key.key_hash,
             hostname=hostname,
+            logged_in_user=logged_in_user,
             ip_address=ip_address,
             operating_system=operating_system,
             agent_version=agent_version,
@@ -170,6 +185,51 @@ class ClientService:
         db.commit()
         logger.info("New client %s (%s) registered successfully.", new_client.id, hostname)
         return new_client, True
+
+    
+    def delete_client(
+        self,
+        db: Session,
+        client_id: uuid.UUID,
+    ) -> None:
+        """
+        Delete a registered client and preserve an audit trail.
+        """
+
+        client = self._clients.get_by_id(db, client_id)
+
+        if client is None:
+            raise ClientNotFoundError(client_id)
+
+        hostname = client.hostname
+
+        # Create audit record BEFORE deleting the client.
+        self._audit_logs.create(
+            db,
+            event_type="CLIENT_DELETED",
+            severity=AuditSeverity.WARNING,
+            description=(
+                f"Client '{hostname}' (client_id={client_id}) "
+                "was deleted by an administrator."
+            ),
+            client_id=client_id,
+        )
+
+        # Now delete the client. The FK's ON DELETE SET NULL
+        # will preserve the audit row while clearing client_id.
+        self._clients.delete(db, client)
+
+        db.commit()
+
+        logger.info(
+            "Client %s (%s) deleted successfully.",
+            client_id,
+            hostname,
+        )
+
+
+
+
 
     def _log_conflict(self, db: Session, *, description: str, client_id: uuid.UUID | None) -> None:
         self._audit_logs.create(

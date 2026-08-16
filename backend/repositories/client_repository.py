@@ -43,6 +43,12 @@ class ClientRepository:
         statement, since ``id`` is always the table's primary key.
         """
         return db.get(Client, client_id)
+    def delete(self, db: Session, client: Client) -> None:
+        """
+        Delete a registered Client record.
+        """
+        db.delete(client)
+        db.flush()
 
     def list_all(self, db: Session) -> list[Client]:
         """
@@ -88,6 +94,7 @@ class ClientRepository:
         agent_guid: uuid.UUID,
         api_key_hash: str,
         hostname: str,
+        logged_in_user: str | None,
         ip_address: str,
         operating_system: str,
         agent_version: str,
@@ -98,6 +105,7 @@ class ClientRepository:
             agent_guid=agent_guid,
             api_key_hash=api_key_hash,
             hostname=hostname,
+            logged_in_user=logged_in_user,
             ip_address=ip_address,
             operating_system=operating_system,
             agent_version=agent_version,
@@ -113,6 +121,7 @@ class ClientRepository:
         client: Client,
         *,
         hostname: str,
+        logged_in_user: str | None,
         ip_address: str,
         operating_system: str,
         agent_version: str,
@@ -128,6 +137,7 @@ class ClientRepository:
         and serves as the "last registration timestamp".
         """
         client.hostname = hostname
+        client.logged_in_user = logged_in_user
         client.ip_address = ip_address
         client.operating_system = operating_system
         client.agent_version = agent_version

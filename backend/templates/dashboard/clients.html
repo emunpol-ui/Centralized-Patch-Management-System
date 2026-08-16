@@ -60,6 +60,7 @@
                 <thead class="table-light">
                     <tr>
                         <th>Hostname</th>
+                        <th>Logged-in User</th>
                         <th>IP Address</th>
                         <th>Operating System</th>
                         <th>Agent Version</th>
@@ -73,6 +74,7 @@
                     {% for client in result.clients %}
                     <tr class="client-row" data-href="/dashboard/clients/{{ client.id }}">
                         <td>{{ client.hostname }}</td>
+                        <td>{{ client.logged_in_user or "—" }}</td>
                         <td>{{ client.ip_address }}</td>
                         <td class="small">{{ client.operating_system }}</td>
                         <td class="small">{{ client.agent_version }}</td>
@@ -93,13 +95,26 @@
                             {% endif %}
                         </td>
                         <td class="small">{{ client.registration_date.strftime("%Y-%m-%d %H:%M:%S UTC") }}</td>
-                        <td class="text-end">
-                            <a href="/dashboard/clients/{{ client.id }}" class="btn btn-outline-primary btn-sm">Details</a>
+                       <td class="text-end">
+                            <a
+                                href="/dashboard/clients/{{ client.id }}"
+                                class="btn btn-outline-primary btn-sm"
+                            >
+                                Details
+                            </a>
+
+                            <button
+                                type="button"
+                                class="btn btn-outline-danger btn-sm"
+                                onclick="deleteClient(event, '{{ client.id }}', '{{ client.hostname }}')"
+                            >
+                                Delete
+                            </button>
                         </td>
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="8" class="text-center text-muted py-4">
+                        <td colspan="9" class="text-center text-muted py-4">
                             No clients registered yet.
                         </td>
                     </tr>
@@ -138,6 +153,20 @@
                     <p class="text-muted mb-3">
                         Generate an enrollment credential for a new CPMS client.
                     </p>
+                     <div class="mb-3">
+                        <label for="clientHostname" class="form-label">
+                           Hostname
+                        </label>
+
+                        <input
+                            type="text"
+                            class="form-control"
+                            id="clientHostname"
+                            placeholder="e.g. P7-01"
+                            required
+        >
+                    </div>
+
 
                     <button
                         type="button"
@@ -243,18 +272,66 @@
 </div>
 
 <script>
-    // Make each client row clickable (except the explicit "Details" link,
-    // which already navigates on its own) without introducing a new
-    // frontend framework - consistent with the existing dashboard.js
-    // vanilla-JS approach.
+    // Make each client row clickable, except explicit action controls.
     document.querySelectorAll("tr.client-row").forEach(function (row) {
         row.style.cursor = "pointer";
+
         row.addEventListener("click", function (event) {
-            if (event.target.closest("a")) {
+            if (event.target.closest("a, button")) {
                 return;
             }
+
             window.location = row.dataset.href;
         });
     });
+
+    async function deleteClient(event, clientId, hostname) {
+        event.stopPropagation();
+
+        const confirmed = confirm(
+            `Delete client "${hostname}"?\n\n` +
+            "This will permanently remove the client registration."
+        );
+
+        if (!confirmed) {
+            return;
+        }
+
+        // Use the CSRF token already issued by the dashboard.
+        const csrfToken = document.cookie
+            .split("; ")
+            .find(row => row.startsWith("csrf_token="))
+            ?.split("=")[1];
+
+        try {
+            const response = await fetch(
+                `/api/admin/dashboard/clients/${clientId}`,
+                {
+                    method: "DELETE",
+                    headers: {
+                        "X-CSRF-Token": csrfToken || ""
+                    }
+                }
+            );
+
+            const result = await response.json();
+
+            if (!response.ok || !result.success) {
+                alert(
+                    result.message ||
+                    result.error ||
+                    "Failed to delete client."
+                );
+                return;
+            }
+
+            // Refresh the client list after successful deletion.
+            window.location.href = "/dashboard/clients";
+
+        } catch (error) {
+            console.error("Client deletion failed:", error);
+            alert("Unable to delete client. Please try again.");
+        }
+    }
 </script>
 {% endblock %}

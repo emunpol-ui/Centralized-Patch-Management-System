@@ -32,6 +32,7 @@ from backend.api.dependencies import (
     DBSessionDependency,
     VersionComparisonServiceDependency,
 )
+from backend.services.client_service import ClientNotFoundError
 from backend.core.exceptions import AppException
 from backend.models.enums import UpdateStatus
 from backend.repositories.client_repository import ClientRepository
@@ -47,12 +48,6 @@ router = APIRouter(prefix="/api/admin", tags=["Version Comparison"])
 # are otherwise only ever instantiated inside a service's constructor).
 _client_repository = ClientRepository()
 
-
-class ClientNotFoundError(AppException):
-    """Raised when an administrator requests updates for an unknown client ID."""
-
-    def __init__(self, client_id: UUID) -> None:
-        super().__init__(f"Client '{client_id}' was not found.", status_code=404)
 
 
 @router.get(
