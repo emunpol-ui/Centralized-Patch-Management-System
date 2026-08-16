@@ -106,6 +106,10 @@ async def upload_repository_package(
         description="Silent installation command, referencing the installer via the '{installer_path}' "
         "placeholder token.",
     ),
+    publisher: str | None = Form(
+        default=None,
+        description="Software publisher, optional (FR-004/FR-007: 'where available').",
+    ),
 ) -> Dict[str, Any]:
     """
     Upload and register a new repository installer package (FR-006).
@@ -122,6 +126,7 @@ async def upload_repository_package(
             version=version,
             installer_type=installer_type,
             silent_command=silent_command,
+            publisher=publisher,
         )
     except ValidationError as exc:
         raise RepositoryPackageMetadataError(exc) from exc
@@ -142,6 +147,7 @@ async def upload_repository_package(
         file_stream=installer.file,
         storage_dir=settings.repository_path,
         max_size_bytes=effective.max_installer_upload_size_bytes,
+        publisher=metadata.publisher,
     )
 
     response = RepositoryPackageResponse.model_validate(package)

@@ -14,6 +14,7 @@ Repository Package").
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -55,6 +56,15 @@ class RepositoryPackageUploadMetadata(BaseModel):
     silent_command: str = Field(
         ..., max_length=2000, description="Silent installation command referencing '{installer_path}'."
     )
+    publisher: Optional[str] = Field(
+        None,
+        max_length=255,
+        description=(
+            "Software publisher, optional (FR-004/FR-007: 'where available'). Used, together with "
+            "software name, to disambiguate repository packages that share a name across different "
+            "vendors (FR-007 Software Matching Rules)."
+        ),
+    )
 
     @field_validator("software_name", "version")
     @classmethod
@@ -62,6 +72,18 @@ class RepositoryPackageUploadMetadata(BaseModel):
         if not value or not value.strip():
             raise ValueError("must not be empty")
         return value.strip()
+
+    @field_validator("publisher")
+    @classmethod
+    def blank_publisher_to_none(cls, value: Optional[str]) -> Optional[str]:
+        """
+        Treat a whitespace-only publisher the same as an absent one,
+        consistent with ``backend.schemas.inventory.
+        SoftwareInventoryItem.blank_optional_to_none``.
+        """
+        if value is not None and not value.strip():
+            return None
+        return value.strip() if value is not None else None
 
     @field_validator("silent_command")
     @classmethod
@@ -103,6 +125,7 @@ class RepositoryPackageResponse(BaseModel):
     id: UUID = Field(..., description="Repository package identifier.")
     software_name: str = Field(..., description="Approved software name.")
     version: str = Field(..., description="Approved software version.")
+    publisher: Optional[str] = Field(None, description="Software publisher, if provided at upload.")
     installer_filename: str = Field(..., description="Server-generated, sanitized storage filename.")
     installer_type: InstallerType = Field(..., description="EXE or MSI.")
     silent_command: str = Field(..., description="Silent installation command.")

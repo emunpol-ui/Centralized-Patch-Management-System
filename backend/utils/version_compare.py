@@ -16,14 +16,14 @@ FR-007 Software Matching Rules implemented here:
       be removed before comparison.
     * Where available, software publisher shall additionally be
       considered to reduce false matches between similarly named
-      applications from different vendors. ``normalize_publisher`` below
-      provides the same trim/case-fold normalization for this purpose;
-      it is not currently invoked by ``VersionComparisonService`` because
-      ``RepositoryPackage`` (the repository-side match target) has no
-      publisher column in the existing schema - see the design note on
-      that service's ``_select_best_match`` - but is provided here as a
-      general-purpose helper for any future caller that compares two
-      publisher-bearing records (e.g. a future repository schema change).
+      applications from different vendors. ``normalize_publisher``
+      provides the trim/case-fold normalization for this purpose, and
+      ``software_identity_matches`` combines it with
+      ``normalize_software_name`` into the single predicate shared by
+      repository duplicate-detection (``RepositoryPackageRepository``)
+      and inventory-to-repository matching
+      (``VersionComparisonService``), so the two call sites can never
+      disagree on what "the same software" means.
 
 FR-007 Version Comparison Rules implemented here:
 
@@ -47,7 +47,14 @@ from typing import Optional, Tuple
 # removed before comparison." Matches only a trailing suffix so that a
 # legitimate architecture token embedded elsewhere in a name is left
 # untouched.
-_ARCH_SUFFIX_PATTERN = re.compile(r"\s*\((?:32|64)-bit\)\s*$", re.IGNORECASE)
+_ARCH_SUFFIX_PATTERN = re.compile(
+    r"\s*\((?:32|64)-bit\)\s*$",
+    re.IGNORECASE,
+)
+
+_TRAILING_VERSION_PATTERN = re.compile(
+    r"\s+\d+(?:\.\d+)+\s*$"
+)
 
 # A version *segment* must be composed only of digits; anything else
 # (letters, hyphens, pre-release tags, empty segments, etc.) makes the
@@ -86,6 +93,45 @@ def normalize_publisher(publisher: Optional[str]) -> Optional[str]:
         return None
     trimmed = publisher.strip()
     return trimmed.casefold() if trimmed else None
+
+
+def software_identity_matches(
+    name_a: str,
+    publisher_a: Optional[str],
+    name_b: str,
+    publisher_b: Optional[str],
+) -> bool:
+    """
+    Decide whether two software records refer to the same software
+    identity, per FR-007's Software Matching Rules.
+
+    Rules applied (PRS FR-007 "Software Matching Rules"):
+
+        * Names are always compared via ``normalize_software_name``
+          (trim, strip a trailing architecture suffix, case-fold).
+        * When *both* records report a publisher, the normalized
+          publishers must also match - this is the "where available ...
+          to reduce false matches between similarly named applications
+          from different vendors" case.
+        * When *either* record's publisher is missing/blank, matching
+          falls back to name only, since there is nothing to compare -
+          FR-007 does not require publisher, only that it be considered
+          "where available".
+
+    This is the single predicate shared by repository duplicate
+    detection (``RepositoryPackageRepository.get_active_conflict``,
+    ``list_approved_for_identity``) and inventory-to-repository matching
+    (``VersionComparisonService``), so "the same software" means exactly
+    the same thing in both places.
+    """
+    if normalize_software_name(name_a) != normalize_software_name(name_b):
+        return False
+
+    norm_publisher_a = normalize_publisher(publisher_a)
+    norm_publisher_b = normalize_publisher(publisher_b)
+    if norm_publisher_a is None or norm_publisher_b is None:
+        return True
+    return norm_publisher_a == norm_publisher_b
 
 
 def parse_version(version: str) -> Optional[Tuple[int, ...]]:
@@ -146,3 +192,24 @@ def compare_versions(installed_version: str, approved_version: str) -> Optional[
     if padded_installed > padded_approved:
         return 1
     return 0
+
+
+def same_version(version_a: str, version_b: str) -> bool:
+    """
+    Decide whether two version strings represent the same version, using
+    the same numeric, period-delimited comparison rules as
+    ``compare_versions`` (so, e.g., ``"4.15"`` and ``"4.15.0"`` are the
+    same version here exactly as they are for update-status purposes).
+
+    Falls back to a trimmed, case-sensitive exact string match when
+    either string cannot be parsed into numeric segments, so two
+    installers legitimately targeting the same unparseable version
+    string (e.g. a vendor build tag) are still recognized as a
+    duplicate - the same "duplicate repository entries violate
+    repository rules" condition FR-006 guards against - without
+    silently treating two *different* unparseable strings as equal.
+    """
+    comparison = compare_versions(version_a, version_b)
+    if comparison is not None:
+        return comparison == 0
+    return version_a.strip() == version_b.strip()

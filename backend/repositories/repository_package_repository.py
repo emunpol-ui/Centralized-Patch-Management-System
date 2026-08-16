@@ -23,6 +23,13 @@ dashboard requires (``list_all``, ``get_by_id``) and the status-update
 operation backing package removal (``deactivate``). Metadata *editing*
 (e.g. changing the silent install command after upload) remains out of
 scope and is not implemented here.
+
+Extended again by the repository-identity hardening ticket with
+publisher-aware identity matching (``software_identity_matches``, shared
+with ``VersionComparisonService``) and ``list_approved_for_identity``,
+which ``RepositoryService`` uses to supersede a software identity's
+previous approved package when a new one is approved, so at most one
+``APPROVED`` package exists per identity going forward.
 """
 
 from __future__ import annotations
@@ -35,7 +42,7 @@ from sqlalchemy.orm import Session
 
 from backend.models.enums import ApprovalStatus, InstallerType
 from backend.models.repository_package import RepositoryPackage
-from backend.utils.version_compare import normalize_software_name
+from backend.utils.version_compare import same_version, software_identity_matches
 
 
 class RepositoryPackageRepository:
@@ -56,39 +63,63 @@ class RepositoryPackageRepository:
         return list(db.execute(stmt).scalars().all())
 
     def get_active_conflict(
-        self, db: Session, *, software_name: str, version: str
+        self, db: Session, *, software_name: str, version: str, publisher: Optional[str] = None
     ) -> Optional[RepositoryPackage]:
         """
         Return an existing ``APPROVED`` package that would conflict with a
-        new upload of the same ``software_name``/``version`` (FR-006
+        new upload of the same software identity and version (FR-006
         Error Conditions: "Duplicate repository entries violate
         repository rules"), or ``None`` if no such package exists.
 
-        Name matching reuses FR-007's ``normalize_software_name`` rule
-        (trim, case-fold, strip a trailing architecture suffix) so that,
-        for example, ``"Google Chrome"`` and ``"google chrome"`` are
-        correctly treated as the same package for duplicate-detection
-        purposes - the same normalization already applied when matching
-        inventory against the repository. ``version`` is compared as a
-        trimmed, exact string match: two installers legitimately
-        targeting the identical version string is precisely the duplicate
-        condition FR-006 guards against.
+        Identity matching uses ``software_identity_matches`` (FR-007
+        Software Matching Rules: normalized name, plus normalized
+        publisher when *both* sides report one) - the same predicate used
+        by ``VersionComparisonService`` - so that, for example,
+        ``"Google Chrome"`` and ``"google chrome"`` are treated as the
+        same package, while two different vendors' same-named software
+        are not conflated once both supply a publisher. Version equality
+        uses ``same_version`` so that, consistent with FR-007's numeric
+        version comparison rules, ``"4.15"`` and ``"4.15.0"`` are
+        recognized as the identical version for duplicate-detection
+        purposes, not merely for update-status purposes.
 
         ``INACTIVE`` packages (FR-017 "removed" entries) are intentionally
         excluded - a previously removed package must not block a new
-        upload of the same name/version.
+        upload of the same identity/version.
         """
-        normalized_target_name = normalize_software_name(software_name)
-        normalized_target_version = version.strip()
-
         stmt = select(RepositoryPackage).where(RepositoryPackage.approval_status == ApprovalStatus.APPROVED)
         for candidate in db.execute(stmt).scalars().all():
             if (
-                normalize_software_name(candidate.software_name) == normalized_target_name
-                and candidate.version.strip() == normalized_target_version
+                software_identity_matches(software_name, publisher, candidate.software_name, candidate.publisher)
+                and same_version(version, candidate.version)
             ):
                 return candidate
         return None
+
+    def list_approved_for_identity(
+        self, db: Session, *, software_name: str, publisher: Optional[str] = None
+    ) -> List[RepositoryPackage]:
+        """
+        Return every currently ``APPROVED`` package that shares the given
+        software identity (FR-007 Software Matching Rules, via
+        ``software_identity_matches``).
+
+        Used by ``RepositoryService`` to enforce the "one current
+        approved package per software identity" invariant when a new
+        package is approved (the "Approval Transition" behavior): the
+        previously approved package(s) for the same identity are
+        superseded rather than left ``APPROVED`` alongside the new one.
+        Under normal operation this returns at most one package; it may
+        legitimately return more than one for data uploaded before this
+        invariant was introduced, which callers should treat as "all of
+        these are superseded", not as an error.
+        """
+        stmt = select(RepositoryPackage).where(RepositoryPackage.approval_status == ApprovalStatus.APPROVED)
+        return [
+            candidate
+            for candidate in db.execute(stmt).scalars().all()
+            if software_identity_matches(software_name, publisher, candidate.software_name, candidate.publisher)
+        ]
 
     def create(
         self,
@@ -101,6 +132,7 @@ class RepositoryPackageRepository:
         silent_command: str,
         checksum: str,
         file_size: int,
+        publisher: Optional[str] = None,
         approval_status: ApprovalStatus = ApprovalStatus.APPROVED,
     ) -> RepositoryPackage:
         """
@@ -113,6 +145,10 @@ class RepositoryPackageRepository:
         deployment selection" once its metadata is recorded, with no
         separate approval workflow currently defined (SYS-*/future
         enhancement territory per the SAD's Extensibility notes).
+
+        ``publisher`` is optional (FR-004/FR-007: "where available") and
+        defaults to ``None`` for callers - and legacy rows - that do not
+        supply it.
         """
         package = RepositoryPackage(
             software_name=software_name,
@@ -122,6 +158,7 @@ class RepositoryPackageRepository:
             silent_command=silent_command,
             checksum=checksum,
             file_size=file_size,
+            publisher=publisher,
             approval_status=approval_status,
         )
         db.add(package)

@@ -39,10 +39,27 @@ as pure, database-independent functions in
 ``backend.utils.version_compare`` rather than inline in this service, so
 they can be unit-tested in isolation and reused without a database
 session. This service is responsible only for orchestrating repositories
-and applying those rules to produce a per-item classification. See
-``_select_best_match`` below for why publisher is not used to
-disambiguate repository matches (``RepositoryPackage`` has no publisher
-column in the existing schema).
+and applying those rules to produce a per-item classification.
+
+--------------------------------------------------------------------------
+DESIGN NOTE - identity matching (repository-identity hardening ticket)
+
+``RepositoryPackage`` now carries an optional ``publisher`` column (see
+``backend.models.repository_package.RepositoryPackage``), so matching
+uses the shared ``software_identity_matches`` predicate from
+``backend.utils.version_compare`` - the same predicate
+``RepositoryPackageRepository``/``RepositoryService`` use to detect
+duplicate uploads and to supersede a software identity's previously
+approved package. A name-only bucket index is still used as a cheap
+first-pass filter (grouping is by normalized name), but the actual
+match decision within a bucket goes through ``software_identity_matches``
+so that two different vendors' same-named software are not conflated
+once both the inventory record and the candidate package report a
+publisher. Because ``RepositoryService`` now enforces "at most one
+``APPROVED`` package per software identity" going forward, the
+highest-parseable-version tie-break in ``_select_best_match`` is a
+safety net for pre-existing data uploaded before that invariant existed,
+not the primary disambiguation mechanism.
 """
 
 from __future__ import annotations
@@ -59,7 +76,12 @@ from backend.models.repository_package import RepositoryPackage
 from backend.models.software_inventory import SoftwareInventory
 from backend.repositories.repository_package_repository import RepositoryPackageRepository
 from backend.repositories.software_inventory_repository import SoftwareInventoryRepository
-from backend.utils.version_compare import compare_versions, normalize_software_name, parse_version
+from backend.utils.version_compare import (
+    compare_versions,
+    normalize_software_name,
+    parse_version,
+    software_identity_matches,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -145,32 +167,45 @@ def _select_best_match(
     that already share ``record``'s normalized software name (FR-007
     Software Matching Rules).
 
-    FR-007 additionally allows publisher to be considered "where
-    available" to reduce false matches, but ``RepositoryPackage`` (PRS
-    Section 7.5.3 / ``backend/models/repository_package.py``) does not
-    currently model a ``publisher`` column - only ``SoftwareInventory``
-    does - so publisher-based disambiguation is not applied here. This is
-    a schema constraint inherited from the existing, already-implemented
-    ``RepositoryPackage`` model (not modified by this ticket, per its
-    "modify only the minimum files required" instruction), not a
-    deviation from FR-007's *intent*; name-only matching is the strictest
-    disambiguation the current data model supports.
+    Candidates are first narrowed to those whose full identity matches
+    ``record`` via ``software_identity_matches`` - the same predicate
+    used by ``RepositoryPackageRepository``/``RepositoryService`` for
+    duplicate detection and approval supersession. This applies FR-007's
+    "where available" publisher disambiguation: when both ``record`` and
+    a candidate report a publisher, they must match; when either side is
+    missing a publisher, matching falls back to name only, so inventory
+    items collected before publisher was populated (or repository
+    packages uploaded without one) are not spuriously classified as Not
+    Managed.
 
-    If several candidates remain (e.g. more than one approved entry
-    happens to share a normalized name), the one with the highest
-    parseable version is preferred, as the most-current administrator-
-    approved target; a candidate with an unparseable version is only
-    chosen if no parseable candidate exists, so an obviously comparable
-    match is never skipped in favor of a broken one.
+    ``RepositoryService`` now enforces "at most one ``APPROVED`` package
+    per software identity" going forward (the "Approval Transition"
+    behavior), so under normal operation at most one candidate should
+    remain after identity filtering. As a safety net for data uploaded
+    before that invariant existed - or for legacy rows with no publisher
+    that still happen to share a normalized name - if several candidates
+    remain, the one with the highest parseable version is preferred, as
+    the most-current administrator-approved target; a candidate with an
+    unparseable version is only chosen if no parseable candidate exists,
+    so an obviously comparable match is never skipped in favor of a
+    broken one.
     """
     if not candidates:
+        return None
+
+    identity_matches = [
+        candidate
+        for candidate in candidates
+        if software_identity_matches(record.software_name, record.publisher, candidate.software_name, candidate.publisher)
+    ]
+    if not identity_matches:
         return None
 
     def sort_key(package: RepositoryPackage) -> tuple:
         parsed = parse_version(package.version)
         return (parsed is not None, parsed or ())
 
-    return max(candidates, key=sort_key)
+    return max(identity_matches, key=sort_key)
 
 
 def _classify(

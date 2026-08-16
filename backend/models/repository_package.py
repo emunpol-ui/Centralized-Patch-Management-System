@@ -8,7 +8,7 @@ FR-017 Repository Maintenance).
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING, List, Optional
 
 from sqlalchemy import Integer, String, Text
 from sqlalchemy import Enum as SAEnum
@@ -37,12 +37,26 @@ class RepositoryPackage(AuditModel):
     ``approval_status = INACTIVE`` rather than physically deleting the
     row - see the design note in ``backend/models/deployment.py`` for why
     this matters for deployment-history integrity.
+
+    ``publisher`` (repository-identity hardening ticket) is optional,
+    mirroring ``SoftwareInventory.publisher`` (FR-004: "where
+    available"). FR-007's Software Matching Rules allow publisher to be
+    considered "where available" to disambiguate software that shares a
+    name across different vendors; before this field existed,
+    ``RepositoryPackage`` had no publisher to match against and
+    ``VersionComparisonService`` fell back to name-only matching
+    unconditionally. Existing rows are backfilled to ``NULL`` by the
+    accompanying migration and continue to match by name only (see
+    ``backend.utils.version_compare.software_identity_matches``), so no
+    previously-working comparison or deployment behavior changes for
+    packages that do not set this field.
     """
 
     __tablename__ = "repository_packages"
 
     software_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     version: Mapped[str] = mapped_column(String(100), nullable=False)
+    publisher: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     installer_filename: Mapped[str] = mapped_column(String(255), nullable=False)
     installer_type: Mapped[InstallerType] = mapped_column(
         SAEnum(InstallerType, name="installer_type", native_enum=False, validate_strings=True),
