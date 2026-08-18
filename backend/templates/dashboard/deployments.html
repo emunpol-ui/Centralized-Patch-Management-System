@@ -118,6 +118,7 @@
                         <th>Exit Code</th>
                         <th>Error</th>
                         <th>Batch</th>
+                        <th>Actions</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -142,10 +143,25 @@
                         </td>
                         <td class="small text-danger">{{ row.target.error_message or "" }}</td>
                         <td class="small text-muted">{{ row.target.deployment_id }}</td>
+                        <td class="text-end">
+                            {% if row.target.status.name == "PENDING" %}
+                                <button
+                                    type="button"
+                                    class="btn btn-outline-danger btn-sm"
+                                    onclick="cancelDeployment('{{ row.target.id }}', this)"
+                                >
+                                    Cancel
+                                </button>
+                            {% elif row.target.status.name == "CANCELLED" %}
+                                <span class="text-muted small">Cancelled</span>
+                            {% else %}
+                                <span class="text-muted small">&mdash;</span>
+                            {% endif %}
+                        </td>
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="8" class="text-center text-muted py-4">
+                        <td colspan="9" class="text-center text-muted py-4">
                             No deployment targets match the current filters.
                         </td>
                     </tr>
@@ -155,4 +171,68 @@
         </div>
     </div>
 </div>
+<script>
+async function cancelDeployment(targetId, button) {
+    const confirmed = confirm(
+        "Cancel this deployment?\n\n" +
+        "This action can only cancel a deployment that is still Pending."
+    );
+
+    if (!confirmed) {
+        return;
+    }
+
+    const originalText = button.textContent;
+
+    button.disabled = true;
+    button.textContent = "Cancelling...";
+
+    const csrfToken = document.cookie
+        .split("; ")
+        .find(row => row.startsWith("csrf_token="))
+        ?.split("=")[1];
+
+    try {
+        const response = await fetch(
+            `/api/admin/deployments/${targetId}/cancel`,
+            {
+                method: "POST",
+                credentials: "same-origin",
+                headers: {
+                    "X-CSRF-Token": csrfToken || ""
+                }
+            }
+        );
+
+        const result = await response.json();
+
+        if (!response.ok || !result.success) {
+            alert(
+                result.message ||
+                result.error ||
+                "Unable to cancel deployment."
+            );
+
+            button.disabled = false;
+            button.textContent = originalText;
+            return;
+        }
+
+        // Refresh the deployment monitoring page so the new
+        // Cancelled status is immediately reflected.
+        window.location.reload();
+
+    } catch (error) {
+        console.error("Deployment cancellation failed:", error);
+
+        alert(
+            "Unable to cancel the deployment. " +
+            "Please try again."
+        );
+
+        button.disabled = false;
+        button.textContent = originalText;
+    }
+}
+</script>
 {% endblock %}

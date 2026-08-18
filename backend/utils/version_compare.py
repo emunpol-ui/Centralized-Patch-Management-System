@@ -64,19 +64,33 @@ _NUMERIC_SEGMENT_PATTERN = re.compile(r"^\d+$")
 
 def normalize_software_name(name: str) -> str:
     """
-    Normalize a software name for FR-007 matching purposes: trim
-    leading/trailing whitespace, strip a trailing architecture suffix
-    such as ``(64-bit)`` or ``(32-bit)``, then case-fold for
-    case-insensitive comparison.
+    Normalize a software name for FR-007 matching purposes.
 
-    ``casefold`` (rather than ``lower``) is used for the same reason it
-    is used elsewhere in this codebase (see
-    ``backend.services.inventory_service._normalize_key``): it is the
-    more thorough Unicode-aware case-insensitive comparison primitive.
+    Normalization performs the following operations in order:
+
+    1. Trim leading/trailing whitespace.
+    2. Strip a trailing architecture suffix such as ``(64-bit)`` or
+       ``(32-bit)``.
+    3. Strip a trailing dotted numeric version token such as ``3.13.14``
+       or ``3.14.7`` when it is part of the software display name.
+    4. Case-fold for case-insensitive comparison.
+
+    The actual installed/approved version remains in the separate
+    version fields and is compared by ``compare_versions()``.
     """
     trimmed = name.strip()
-    without_arch_suffix = _ARCH_SUFFIX_PATTERN.sub("", trimmed).strip()
-    return without_arch_suffix.casefold()
+
+    without_arch_suffix = _ARCH_SUFFIX_PATTERN.sub(
+        "",
+        trimmed,
+    ).strip()
+
+    without_trailing_version = _TRAILING_VERSION_PATTERN.sub(
+        "",
+        without_arch_suffix,
+    ).strip()
+
+    return " ".join(without_trailing_version.split()).casefold()
 
 
 def normalize_publisher(publisher: Optional[str]) -> Optional[str]:
