@@ -11,79 +11,123 @@
     <link href="/static/css/dashboard.css" rel="stylesheet">
     {% block extra_head %}{% endblock %}
 </head>
-<body class="bg-body-tertiary">
-    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
-        <div class="container-fluid">
-            <a class="navbar-brand" href="/dashboard">CPMS</a>
-            <button
-                class="navbar-toggler"
-                type="button"
-                data-bs-toggle="collapse"
-                data-bs-target="#cpmsNavbar"
-                aria-controls="cpmsNavbar"
-                aria-expanded="false"
-                aria-label="Toggle navigation"
-            >
-                <span class="navbar-toggler-icon"></span>
-            </button>
-            <div class="collapse navbar-collapse" id="cpmsNavbar">
-                <ul class="navbar-nav me-auto mb-2 mb-lg-0">
-                    <li class="nav-item">
+<body>
+    <div class="app-shell">
+        <aside class="offcanvas-lg offcanvas-start sidebar" tabindex="-1" id="cpmsSidebar" aria-labelledby="cpmsSidebarLabel">
+            <div class="offcanvas-header sidebar-header">
+                <a class="sidebar-brand" href="/dashboard" id="cpmsSidebarLabel">
+                    <span class="sidebar-brand-mark">CP</span>
+                    <span>
+                        CPMS
+                        <span class="sidebar-brand-sub">Patch Management</span>
+                    </span>
+                </a>
+                <button
+                    type="button"
+                    class="btn-close d-lg-none"
+                    data-bs-dismiss="offcanvas"
+                    data-bs-target="#cpmsSidebar"
+                    aria-label="Close"
+                ></button>
+            </div>
+            <div class="offcanvas-body sidebar-body">
+                <ul class="sidebar-nav">
+                    <li>
                         <a
-                            class="nav-link {% if request.url.path == '/dashboard' %}active{% endif %}"
+                            class="sidebar-link {% if request.url.path == '/dashboard' %}active{% endif %}"
                             {% if request.url.path == '/dashboard' %}aria-current="page"{% endif %}
                             href="/dashboard"
-                        >Dashboard</a>
+                        >
+                            <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/></svg>
+                            Dashboard
+                        </a>
                     </li>
-                    <li class="nav-item">
+                    <li>
                         <a
-                            class="nav-link {% if request.url.path.startswith('/dashboard/clients') %}active{% endif %}"
+                            class="sidebar-link {% if request.url.path.startswith('/dashboard/clients') %}active{% endif %}"
                             {% if request.url.path.startswith('/dashboard/clients') %}aria-current="page"{% endif %}
                             href="/dashboard/clients"
-                        >Clients</a>
+                        >
+                            <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3.25"/><path d="M3.5 20c0-3.5 2.5-6 5.5-6s5.5 2.5 5.5 6"/><circle cx="17" cy="8.5" r="2.5"/><path d="M15.5 12.5c2.5.2 4.5 2.4 4.5 5.5"/></svg>
+                            Clients
+                        </a>
                     </li>
-                    <li class="nav-item">
+                    <li>
                         <a
-                            class="nav-link {% if request.url.path.startswith('/dashboard/repository') %}active{% endif %}"
+                            class="sidebar-link {% if request.url.path.startswith('/dashboard/repository') %}active{% endif %}"
                             {% if request.url.path.startswith('/dashboard/repository') %}aria-current="page"{% endif %}
                             href="/dashboard/repository"
-                        >Repository</a>
+                        >
+                            <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 7.5 12 3.5l8.5 4v9L12 20.5l-8.5-4Z"/><path d="M3.5 7.5 12 11.5l8.5-4"/><path d="M12 11.5v9"/></svg>
+                            Repository
+                        </a>
                     </li>
-                    <li class="nav-item">
+                    <li>
                         <a
-                            class="nav-link {% if request.url.path.startswith('/dashboard/deployments') %}active{% endif %}"
+                            class="sidebar-link {% if request.url.path.startswith('/dashboard/deployments') %}active{% endif %}"
                             {% if request.url.path.startswith('/dashboard/deployments') %}aria-current="page"{% endif %}
                             href="/dashboard/deployments"
-                        >Deployments</a>
+                        >
+                            <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5v12"/><path d="M7 8.5 12 3.5l5 5"/><path d="M4.5 15v3a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-3"/></svg>
+                            Deployments
+                        </a>
                     </li>
-                    <li class="nav-item">
+                    <li>
                         <a
-                            class="nav-link {% if request.url.path == '/dashboard/audit-logs' %}active{% endif %}"
+                            class="sidebar-link {% if request.url.path == '/dashboard/audit-logs' %}active{% endif %}"
                             {% if request.url.path == '/dashboard/audit-logs' %}aria-current="page"{% endif %}
                             href="/dashboard/audit-logs"
-                        >Audit Logs</a>
+                        >
+                            <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.5h9l4 4V20a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1Z"/><path d="M9 12h6M9 16h6M9 8h3"/></svg>
+                            Audit Logs
+                        </a>
                     </li>
-                    <li class="nav-item">
+                    <li>
                         <a
-                             class="nav-link {% if request.url.path.startswith('/dashboard/settings') %}active{% endif %}"
+                             class="sidebar-link {% if request.url.path.startswith('/dashboard/settings') %}active{% endif %}"
                              {% if request.url.path.startswith('/dashboard/settings') %}aria-current="page"{% endif %}
                              href="/dashboard/settings"
-                        >Settings</a>
-                    </li>   
+                        >
+                            <svg class="sidebar-icon" viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 13.5a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V19.5a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-1.56 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1H4.5a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.56-1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H10a1.7 1.7 0 0 0 1-1.55V4.5a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87V10a1.7 1.7 0 0 0 1.55 1h.19a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.56 1Z"/></svg>
+                            Settings
+                        </a>
+                    </li>
                 </ul>
-                {% if administrator %}
-                <span class="navbar-text me-3">
-                    Signed in as <strong>{{ administrator.username }}</strong>
-                </span>
-                <button id="logoutButton" type="button" class="btn btn-outline-light btn-sm">Log out</button>
-                {% endif %}
             </div>
-        </div>
-    </nav>
+        </aside>
 
-    <main class="container-fluid py-4">
-        {% block content %}{% endblock %}
-    </main>
+        <div class="main-column">
+            <header class="topbar">
+                <button
+                    class="sidebar-toggle d-lg-none"
+                    type="button"
+                    data-bs-toggle="offcanvas"
+                    data-bs-target="#cpmsSidebar"
+                    aria-controls="cpmsSidebar"
+                    aria-label="Toggle navigation"
+                >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3.5 6.5h17M3.5 12h17M3.5 17.5h17"/></svg>
+                </button>
+                <span class="topbar-title d-lg-none">CPMS</span>
+                <div class="topbar-spacer"></div>
+                {% if administrator %}
+                <div class="topbar-user">
+                    <span class="user-chip">
+                        <span class="user-avatar">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.25"/><path d="M4.5 20c0-4 3.5-6.5 7.5-6.5s7.5 2.5 7.5 6.5"/></svg>
+                        </span>
+                        <span class="user-name">{{ administrator.username }}</span>
+                    </span>
+                    <button id="logoutButton" type="button" class="btn btn-outline-secondary btn-sm">Log out</button>
+                </div>
+                {% endif %}
+            </header>
+
+            <main class="content">
+                {% block content %}{% endblock %}
+            </main>
+        </div>
+    </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <script src="/static/js/dashboard.js"></script>

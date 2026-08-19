@@ -1,9 +1,844 @@
-/* DASH-001 - minimal supplemental styling for the CPMS Dashboard Home page. */
+/* =====================================================================
+   CPMS — Design System
+   -----------------------------------------------------------------
+   Visual-only reskin. Built on top of Bootstrap 5.3 (loaded before
+   this file). Wherever possible this overrides Bootstrap's own CSS
+   custom properties (--bs-*) rather than fighting its rules, so
+   every page that already uses standard Bootstrap classes (.card,
+   .btn, .badge, .table, .form-control, .modal, .alert ...) picks up
+   the new look automatically with no template changes required.
 
-body {
-    min-height: 100vh;
+   Language: iOS / macOS system UI — soft neutrals, glass surfaces,
+   restrained accent, generous spacing, quiet motion.
+   ===================================================================== */
+
+/* ---------------------------------------------------------------------
+   1. Design tokens
+   --------------------------------------------------------------------- */
+:root {
+  /* Type */
+  --cpms-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI",
+    Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji",
+    "Segoe UI Emoji";
+
+  /* Neutrals */
+  --cpms-bg: #f2f3f7;
+  --cpms-bg-alt: #e9ebf1;
+  --cpms-surface: rgba(255, 255, 255, 0.68);
+  --cpms-surface-solid: #ffffff;
+  --cpms-surface-strong: rgba(255, 255, 255, 0.86);
+  --cpms-border: rgba(15, 23, 42, 0.08);
+  --cpms-border-strong: rgba(15, 23, 42, 0.14);
+  --cpms-text: #1b1e24;
+  --cpms-text-secondary: #5b6172;
+  --cpms-text-tertiary: #8a8f9e;
+
+  /* Sidebar (light frosted, not dark-admin-template) */
+  --cpms-sidebar-bg: rgba(250, 250, 252, 0.78);
+  --cpms-sidebar-border: rgba(15, 23, 42, 0.07);
+
+  /* Accent — restrained system blue */
+  --cpms-accent: #2f6fed;
+  --cpms-accent-rgb: 47, 111, 237;
+  --cpms-accent-soft: rgba(47, 111, 237, 0.1);
+  --cpms-accent-hover: #2660d6;
+
+  /* Status */
+  --cpms-success: #1f9d55;
+  --cpms-success-rgb: 31, 157, 85;
+  --cpms-warning: #93690a;
+  --cpms-warning-rgb: 181, 130, 10;
+  --cpms-danger: #c53939;
+  --cpms-danger-rgb: 214, 69, 69;
+  --cpms-info: #2f6fed;
+  --cpms-info-rgb: 47, 111, 237;
+  --cpms-neutral-rgb: 100, 110, 130;
+
+  /* Radii */
+  --cpms-radius-sm: 10px;
+  --cpms-radius-md: 14px;
+  --cpms-radius-lg: 20px;
+  --cpms-radius-pill: 999px;
+
+  /* Shadows */
+  --cpms-shadow-xs: 0 1px 2px rgba(16, 24, 40, 0.04);
+  --cpms-shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.05), 0 1px 1px rgba(16, 24, 40, 0.03);
+  --cpms-shadow-md: 0 8px 24px rgba(16, 24, 40, 0.07), 0 1px 2px rgba(16, 24, 40, 0.04);
+  --cpms-shadow-lg: 0 16px 40px rgba(16, 24, 40, 0.12);
+
+  /* Glass */
+  --cpms-blur: 20px;
+
+  /* ---- Bootstrap variable overrides -------------------------------- */
+  --bs-body-font-family: var(--cpms-font);
+  --bs-body-bg: var(--cpms-bg);
+  --bs-body-color: var(--cpms-text);
+  --bs-border-color: var(--cpms-border);
+  --bs-border-radius: var(--cpms-radius-md);
+  --bs-border-radius-sm: var(--cpms-radius-sm);
+  --bs-border-radius-lg: var(--cpms-radius-lg);
+  --bs-box-shadow-sm: var(--cpms-shadow-sm);
+  --bs-box-shadow: var(--cpms-shadow-md);
+  --bs-box-shadow-lg: var(--cpms-shadow-lg);
+
+  --bs-primary: var(--cpms-accent);
+  --bs-primary-rgb: var(--cpms-accent-rgb);
+  --bs-link-color: var(--cpms-accent);
+  --bs-link-color-rgb: var(--cpms-accent-rgb);
+  --bs-link-hover-color: var(--cpms-accent-hover);
+
+  --bs-success: var(--cpms-success);
+  --bs-success-rgb: var(--cpms-success-rgb);
+  --bs-warning: var(--cpms-warning);
+  --bs-warning-rgb: var(--cpms-warning-rgb);
+  --bs-danger: var(--cpms-danger);
+  --bs-danger-rgb: var(--cpms-danger-rgb);
+  --bs-info: var(--cpms-info);
+  --bs-info-rgb: var(--cpms-info-rgb);
 }
 
-.card .display-6 {
-    font-weight: 600;
+/* ---------------------------------------------------------------------
+   2. Base / background
+   --------------------------------------------------------------------- */
+html {
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  font-family: var(--cpms-font);
+  color: var(--cpms-text);
+  background-color: var(--cpms-bg);
+  background-image:
+    radial-gradient(760px 420px at 8% -6%, rgba(47, 111, 237, 0.07), transparent 60%),
+    radial-gradient(620px 420px at 100% 0%, rgba(120, 90, 230, 0.05), transparent 55%),
+    radial-gradient(900px 600px at 50% 110%, rgba(47, 111, 237, 0.04), transparent 60%);
+  background-attachment: fixed;
+  min-height: 100vh;
+}
+
+::selection {
+  background: rgba(47, 111, 237, 0.18);
+}
+
+/* Quiet, modern scrollbars (progressive enhancement only) */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(15, 23, 42, 0.18) transparent;
+}
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-thumb {
+  background-color: rgba(15, 23, 42, 0.16);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  letter-spacing: -0.01em;
+  font-weight: 650;
+  color: var(--cpms-text);
+}
+.text-muted {
+  color: var(--cpms-text-secondary) !important;
+}
+small, .small {
+  color: inherit;
+}
+.display-6 {
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  color: var(--cpms-text);
+}
+
+/* ---------------------------------------------------------------------
+   3. App shell layout (sidebar + topbar + content)
+   --------------------------------------------------------------------- */
+.app-shell {
+  display: flex;
+  align-items: stretch;
+  min-height: 100vh;
+}
+
+.main-column {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.content {
+  flex: 1 1 auto;
+  padding: 1.75rem;
+  width: 100%;
+}
+
+@media (min-width: 992px) {
+  .content {
+    padding: 2rem 2.5rem 3rem;
+  }
+}
+
+/* ---------------------------------------------------------------------
+   4. Sidebar
+   --------------------------------------------------------------------- */
+.sidebar {
+  --cpms-sidebar-width: 252px;
+  width: var(--cpms-sidebar-width);
+  background: var(--cpms-sidebar-bg);
+  border-right: 1px solid var(--cpms-sidebar-border);
+  backdrop-filter: blur(var(--cpms-blur));
+  -webkit-backdrop-filter: blur(var(--cpms-blur));
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+}
+
+@media (min-width: 992px) {
+  .sidebar {
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    flex-shrink: 0;
+  }
+}
+
+@media (max-width: 991.98px) {
+  .sidebar {
+    width: 280px;
+    background: var(--cpms-surface-strong);
+    box-shadow: var(--cpms-shadow-lg);
+  }
+}
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1.35rem 1.35rem 1rem;
+  border: none;
+}
+
+.sidebar-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  text-decoration: none;
+  color: var(--cpms-text);
+  font-weight: 700;
+  font-size: 1.05rem;
+  letter-spacing: -0.01em;
+}
+
+.sidebar-brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: linear-gradient(155deg, var(--cpms-accent), #6f5bef);
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  box-shadow: 0 4px 10px rgba(47, 111, 237, 0.28);
+}
+
+.sidebar-brand-sub {
+  display: block;
+  font-size: 0.68rem;
+  font-weight: 600;
+  color: var(--cpms-text-tertiary);
+  letter-spacing: 0.02em;
+  margin-top: 1px;
+}
+
+.sidebar-body {
+  padding: 0.25rem 0.9rem 1.5rem;
+  overflow-y: auto;
+}
+
+.sidebar-nav {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.sidebar-link {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.55rem 0.75rem;
+  border-radius: var(--cpms-radius-sm);
+  color: var(--cpms-text-secondary);
+  font-weight: 600;
+  font-size: 0.89rem;
+  text-decoration: none;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.sidebar-link:hover {
+  background: rgba(15, 23, 42, 0.045);
+  color: var(--cpms-text);
+}
+
+.sidebar-link.active {
+  background: var(--cpms-accent-soft);
+  color: var(--cpms-accent);
+}
+
+.sidebar-link .sidebar-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  stroke: currentColor;
+  opacity: 0.9;
+}
+
+.sidebar-divider {
+  height: 1px;
+  background: var(--cpms-sidebar-border);
+  margin: 0.85rem 0.15rem;
+  border: none;
+}
+
+.sidebar-footer {
+  margin-top: auto;
+  padding: 1rem 1.35rem 1.35rem;
+  font-size: 0.72rem;
+  color: var(--cpms-text-tertiary);
+}
+
+/* ---------------------------------------------------------------------
+   5. Topbar
+   --------------------------------------------------------------------- */
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: 1020;
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 0.85rem 1.25rem;
+  background: rgba(242, 243, 247, 0.72);
+  backdrop-filter: blur(var(--cpms-blur));
+  -webkit-backdrop-filter: blur(var(--cpms-blur));
+  border-bottom: 1px solid var(--cpms-border);
+}
+
+@media (min-width: 992px) {
+  .topbar {
+    padding: 0.9rem 2.5rem;
+  }
+}
+
+.sidebar-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: var(--cpms-radius-sm);
+  border: 1px solid var(--cpms-border-strong);
+  background: var(--cpms-surface);
+  color: var(--cpms-text);
+  flex-shrink: 0;
+}
+.sidebar-toggle:hover {
+  background: #fff;
+}
+.sidebar-toggle svg {
+  width: 18px;
+  height: 18px;
+}
+
+.topbar-title {
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.topbar-spacer {
+  flex: 1 1 auto;
+}
+
+.topbar-user {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.user-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.32rem 0.75rem 0.32rem 0.4rem;
+  border-radius: var(--cpms-radius-pill);
+  background: var(--cpms-surface);
+  border: 1px solid var(--cpms-border);
+  font-size: 0.82rem;
+  color: var(--cpms-text-secondary);
+}
+
+.user-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  background: var(--cpms-accent-soft);
+  color: var(--cpms-accent);
+}
+.user-avatar svg {
+  width: 14px;
+  height: 14px;
+}
+
+.user-name {
+  font-weight: 600;
+  color: var(--cpms-text);
+}
+
+/* ---------------------------------------------------------------------
+   6. Cards
+   --------------------------------------------------------------------- */
+.card {
+  background: var(--cpms-surface);
+  backdrop-filter: blur(var(--cpms-blur));
+  -webkit-backdrop-filter: blur(var(--cpms-blur));
+  border: 1px solid var(--cpms-border);
+  border-radius: var(--cpms-radius-lg);
+  box-shadow: var(--cpms-shadow-sm) !important;
+}
+
+.card-header {
+  background: transparent;
+  border-bottom: 1px solid var(--cpms-border);
+  font-weight: 650;
+  font-size: 0.92rem;
+  letter-spacing: -0.005em;
+  padding: 0.95rem 1.25rem;
+  color: var(--cpms-text);
+}
+
+.card-body {
+  padding: 1.25rem;
+}
+
+.card-footer {
+  background: transparent;
+  border-top: 1px solid var(--cpms-border);
+}
+
+/* Clickable dashboard stat cards (home.html already adds its own hover
+   transition inline; this keeps the same affordance app-wide) */
+a > .card,
+.card.dashboard-card {
+  transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
+}
+a:hover > .card,
+.card.dashboard-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--cpms-border-strong);
+  box-shadow: var(--cpms-shadow-md) !important;
+}
+
+/* ---------------------------------------------------------------------
+   7. Tables
+   --------------------------------------------------------------------- */
+.table {
+  --bs-table-bg: transparent;
+  --bs-table-color: var(--cpms-text);
+  --bs-table-border-color: var(--cpms-border);
+  margin-bottom: 0;
+}
+
+.table > thead {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--cpms-text-tertiary);
+}
+
+.table > thead > tr > th {
+  border-bottom: 1px solid var(--cpms-border-strong);
+  font-weight: 650;
+  padding-top: 0.65rem;
+  padding-bottom: 0.65rem;
+  background: transparent;
+}
+
+.table.table-light > thead {
+  background: transparent;
+}
+
+.table > tbody > tr > td,
+.table > tbody > tr > th {
+  padding-top: 0.7rem;
+  padding-bottom: 0.7rem;
+  vertical-align: middle;
+  border-bottom-color: var(--cpms-border);
+}
+
+.table-hover > tbody > tr:hover > * {
+  --bs-table-accent-bg: rgba(47, 111, 237, 0.045);
+  color: var(--cpms-text);
+}
+
+.table-responsive {
+  border-radius: var(--cpms-radius-md);
+}
+
+.table-sm > :not(caption) > * > * {
+  padding-top: 0.45rem;
+  padding-bottom: 0.45rem;
+}
+
+/* ---------------------------------------------------------------------
+   8. Badges / status pills
+   --------------------------------------------------------------------- */
+.badge {
+  font-weight: 650;
+  font-size: 0.72rem;
+  letter-spacing: 0.01em;
+  padding: 0.4em 0.75em;
+  border-radius: var(--cpms-radius-pill);
+  border: 1px solid transparent;
+  vertical-align: middle;
+}
+
+.badge.text-bg-success {
+  background-color: rgba(var(--cpms-success-rgb), 0.12) !important;
+  color: var(--cpms-success) !important;
+  border-color: rgba(var(--cpms-success-rgb), 0.22);
+}
+.badge.text-bg-secondary {
+  background-color: rgba(var(--cpms-neutral-rgb), 0.12) !important;
+  color: #575e6e !important;
+  border-color: rgba(var(--cpms-neutral-rgb), 0.2);
+}
+.badge.text-bg-warning {
+  background-color: rgba(var(--cpms-warning-rgb), 0.14) !important;
+  color: var(--cpms-warning) !important;
+  border-color: rgba(var(--cpms-warning-rgb), 0.24);
+}
+.badge.text-bg-danger {
+  background-color: rgba(var(--cpms-danger-rgb), 0.12) !important;
+  color: var(--cpms-danger) !important;
+  border-color: rgba(var(--cpms-danger-rgb), 0.22);
+}
+.badge.text-bg-info {
+  background-color: rgba(var(--cpms-info-rgb), 0.12) !important;
+  color: var(--cpms-info) !important;
+  border-color: rgba(var(--cpms-info-rgb), 0.22);
+}
+.badge.text-bg-light {
+  background-color: rgba(15, 23, 42, 0.05) !important;
+  color: var(--cpms-text-secondary) !important;
+  border-color: rgba(15, 23, 42, 0.1);
+}
+.badge.text-bg-primary {
+  background-color: var(--cpms-accent-soft) !important;
+  color: var(--cpms-accent) !important;
+  border-color: rgba(var(--cpms-accent-rgb), 0.22);
+}
+
+/* ---------------------------------------------------------------------
+   9. Buttons
+   --------------------------------------------------------------------- */
+.btn {
+  --bs-btn-border-radius: var(--cpms-radius-sm);
+  --bs-btn-font-weight: 600;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  padding: 0.5rem 1.05rem;
+  transition: transform 0.1s ease, box-shadow 0.15s ease, background-color 0.15s ease,
+    border-color 0.15s ease, color 0.15s ease;
+}
+.btn-sm {
+  padding: 0.32rem 0.75rem;
+  font-size: 0.82rem;
+  --bs-btn-border-radius: 9px;
+}
+
+.btn-primary {
+  box-shadow: 0 2px 8px rgba(var(--cpms-accent-rgb), 0.28);
+}
+.btn-primary:hover,
+.btn-primary:focus {
+  background-color: var(--cpms-accent-hover);
+  border-color: var(--cpms-accent-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 14px rgba(var(--cpms-accent-rgb), 0.32);
+}
+.btn-primary:active {
+  transform: translateY(0);
+}
+
+.btn-secondary {
+  --bs-btn-bg: #4b5160;
+  --bs-btn-border-color: #4b5160;
+  --bs-btn-hover-bg: #3d4250;
+  --bs-btn-hover-border-color: #3d4250;
+}
+
+.btn-outline-primary,
+.btn-outline-secondary,
+.btn-outline-danger,
+.btn-outline-warning {
+  background-color: var(--cpms-surface);
+  backdrop-filter: blur(8px);
+  border-width: 1px;
+}
+.btn-outline-primary:hover,
+.btn-outline-secondary:hover,
+.btn-outline-danger:hover,
+.btn-outline-warning:hover {
+  transform: translateY(-1px);
+  box-shadow: var(--cpms-shadow-xs);
+}
+.btn-outline-secondary {
+  --bs-btn-color: var(--cpms-text-secondary);
+  --bs-btn-border-color: var(--cpms-border-strong);
+  --bs-btn-hover-bg: rgba(15, 23, 42, 0.05);
+  --bs-btn-hover-border-color: var(--cpms-border-strong);
+  --bs-btn-hover-color: var(--cpms-text);
+}
+.btn-outline-light {
+  --bs-btn-color: #fff;
+  --bs-btn-border-color: rgba(255, 255, 255, 0.5);
+  --bs-btn-hover-bg: rgba(255, 255, 255, 0.15);
+  --bs-btn-hover-border-color: #fff;
+}
+
+.btn.disabled,
+.btn:disabled {
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+.btn-close {
+  opacity: 0.55;
+}
+.btn-close:hover {
+  opacity: 0.85;
+}
+
+/* ---------------------------------------------------------------------
+   10. Forms
+   --------------------------------------------------------------------- */
+.form-label {
+  font-weight: 650;
+  font-size: 0.82rem;
+  color: var(--cpms-text-secondary);
+  margin-bottom: 0.35rem;
+}
+
+.form-control,
+.form-select {
+  background-color: rgba(255, 255, 255, 0.65);
+  border: 1px solid var(--cpms-border-strong);
+  border-radius: var(--cpms-radius-sm);
+  padding: 0.55rem 0.85rem;
+  color: var(--cpms-text);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+}
+.form-control-sm,
+.form-select-sm {
+  padding: 0.38rem 0.7rem;
+  border-radius: 9px;
+}
+.form-control:focus,
+.form-select:focus {
+  background-color: #fff;
+  border-color: var(--cpms-accent);
+  box-shadow: 0 0 0 3px rgba(var(--cpms-accent-rgb), 0.15);
+}
+.form-control::placeholder {
+  color: var(--cpms-text-tertiary);
+}
+
+.input-group-text {
+  background-color: rgba(15, 23, 42, 0.03);
+  border: 1px solid var(--cpms-border-strong);
+  color: var(--cpms-text-secondary);
+  border-radius: var(--cpms-radius-sm);
+}
+
+.form-check-input {
+  border: 1px solid var(--cpms-border-strong);
+  width: 1.05em;
+  height: 1.05em;
+}
+.form-check-input:checked {
+  background-color: var(--cpms-accent);
+  border-color: var(--cpms-accent);
+}
+.form-check-input:focus {
+  box-shadow: 0 0 0 3px rgba(var(--cpms-accent-rgb), 0.15);
+}
+.form-check-label {
+  color: var(--cpms-text);
+}
+
+.form-text {
+  color: var(--cpms-text-tertiary);
+  font-size: 0.79rem;
+}
+
+/* ---------------------------------------------------------------------
+   11. Alerts
+   --------------------------------------------------------------------- */
+.alert {
+  border-radius: var(--cpms-radius-md);
+  border: 1px solid transparent;
+  backdrop-filter: blur(12px);
+  font-size: 0.9rem;
+}
+.alert-success {
+  background-color: rgba(var(--cpms-success-rgb), 0.1);
+  border-color: rgba(var(--cpms-success-rgb), 0.22);
+  color: var(--cpms-success);
+}
+.alert-danger {
+  background-color: rgba(var(--cpms-danger-rgb), 0.1);
+  border-color: rgba(var(--cpms-danger-rgb), 0.22);
+  color: var(--cpms-danger);
+}
+.alert-warning {
+  background-color: rgba(var(--cpms-warning-rgb), 0.12);
+  border-color: rgba(var(--cpms-warning-rgb), 0.24);
+  color: var(--cpms-warning);
+}
+.alert-info {
+  background-color: rgba(var(--cpms-info-rgb), 0.1);
+  border-color: rgba(var(--cpms-info-rgb), 0.22);
+  color: var(--cpms-info);
+}
+
+/* ---------------------------------------------------------------------
+   12. Modals
+   --------------------------------------------------------------------- */
+.modal-content {
+  background: rgba(255, 255, 255, 0.86);
+  backdrop-filter: blur(28px);
+  -webkit-backdrop-filter: blur(28px);
+  border: 1px solid var(--cpms-border);
+  border-radius: var(--cpms-radius-lg);
+  box-shadow: var(--cpms-shadow-lg);
+}
+.modal-header,
+.modal-footer {
+  border-color: var(--cpms-border);
+  padding: 1.1rem 1.35rem;
+}
+.modal-body {
+  padding: 1.1rem 1.35rem;
+}
+.modal-title {
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+.modal-backdrop.show {
+  opacity: 0.35;
+}
+
+/* ---------------------------------------------------------------------
+   13. Offcanvas (mobile sidebar uses Bootstrap's offcanvas-lg pattern)
+   --------------------------------------------------------------------- */
+.offcanvas.sidebar,
+.offcanvas-lg.sidebar {
+  border: none;
+}
+@media (max-width: 991.98px) {
+  .offcanvas-lg.sidebar.show,
+  .offcanvas-lg.sidebar.showing {
+    box-shadow: var(--cpms-shadow-lg);
+  }
+}
+
+/* ---------------------------------------------------------------------
+   14. Misc components
+   --------------------------------------------------------------------- */
+.nav-link {
+  transition: color 0.15s ease;
+}
+
+.pagination-btn-group .btn.disabled {
+  opacity: 0.45;
+}
+
+hr {
+  border-color: var(--cpms-border);
+}
+
+code {
+  background: rgba(15, 23, 42, 0.05);
+  padding: 0.15em 0.4em;
+  border-radius: 6px;
+  color: #4a3fbf;
+}
+
+/* Fade transitions already used by Bootstrap alerts/modals — just make
+   them a touch quicker/softer */
+.fade {
+  transition: opacity 0.12s linear;
+}
+
+/* ---------------------------------------------------------------------
+   15. Login page
+   --------------------------------------------------------------------- */
+body.cpms-login {
+  background-color: var(--cpms-bg);
+  background-image:
+    radial-gradient(900px 560px at 12% 8%, rgba(47, 111, 237, 0.12), transparent 60%),
+    radial-gradient(760px 520px at 88% 92%, rgba(120, 90, 230, 0.1), transparent 60%);
+}
+
+.login-card {
+  width: 100%;
+  max-width: 23rem;
+  background: var(--cpms-surface-strong);
+  backdrop-filter: blur(var(--cpms-blur));
+  -webkit-backdrop-filter: blur(var(--cpms-blur));
+  border: 1px solid var(--cpms-border);
+  border-radius: var(--cpms-radius-lg);
+  box-shadow: var(--cpms-shadow-lg);
+}
+
+.login-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 13px;
+  margin: 0 auto 0.9rem;
+  background: linear-gradient(155deg, var(--cpms-accent), #6f5bef);
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.95rem;
+  box-shadow: 0 6px 16px rgba(47, 111, 237, 0.32);
+}
+
+/* ---------------------------------------------------------------------
+   16. Responsive spacing tweaks (preserve existing responsive behavior,
+       just tighten padding on small screens)
+   --------------------------------------------------------------------- */
+@media (max-width: 575.98px) {
+  .content {
+    padding: 1.1rem;
+  }
+  .card-body {
+    padding: 1rem;
+  }
 }
