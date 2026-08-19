@@ -9,14 +9,22 @@
         <p class="text-muted mb-0">Registered client computers and their current status.</p>
     </div>
 
-    <button
-        type="button"
-        class="btn btn-primary"
-        data-bs-toggle="modal"
-        data-bs-target="#registerClientModal"
-    >
-        + Register New Client
-    </button>
+    <div>
+        <a href="/dashboard/updates" class="btn btn-outline-warning">Updates Available</a>
+        <button
+            type="button"
+            class="btn btn-primary"
+            data-bs-toggle="modal"
+            data-bs-target="#registerClientModal"
+        >
+            + Register New Client
+        </button>
+    </div>
+</div>
+
+<div id="deleteClientAlert" class="alert alert-success alert-dismissible fade show d-none" role="alert">
+    Client deleted successfully.
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
 </div>
 
 <div class="card shadow-sm mb-3">
@@ -105,8 +113,12 @@
 
                             <button
                                 type="button"
-                                class="btn btn-outline-danger btn-sm"
-                                onclick="deleteClient(event, '{{ client.id }}', '{{ client.hostname }}')"
+                                class="btn btn-outline-danger btn-sm delete-client-btn"
+                                data-bs-toggle="modal"
+                                data-bs-target="#deleteClientModal"
+                                data-client-id="{{ client.id }}"
+                                data-hostname="{{ client.hostname }}"
+                                onclick="event.stopPropagation();"
                             >
                                 Delete
                             </button>
@@ -115,7 +127,11 @@
                     {% else %}
                     <tr>
                         <td colspan="9" class="text-center text-muted py-4">
+                            {% if selected_search or selected_status %}
+                            No clients match the current filters.
+                            {% else %}
                             No clients registered yet.
+                            {% endif %}
                         </td>
                     </tr>
                     {% endfor %}
@@ -271,6 +287,27 @@
     </div>
 </div>
 
+<!-- Delete Client Confirmation Modal (shared by all rows) -->
+<div class="modal fade" id="deleteClientModal" tabindex="-1" aria-labelledby="deleteClientModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="deleteClientModalLabel">Delete Client?</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="mb-1"><strong id="deleteClientHostname"></strong></p>
+                <div id="deleteClientError" class="alert alert-danger d-none" role="alert"></div>
+                <p class="mb-0">This will permanently remove the client registration and cannot be undone.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
+                <button type="button" id="confirmDeleteClientBtn" class="btn btn-danger">Delete</button>
+            </div>
+        </div>
+    </div>
+</div>
+
 <script>
     // Make each client row clickable, except explicit action controls.
     document.querySelectorAll("tr.client-row").forEach(function (row) {
@@ -285,53 +322,80 @@
         });
     });
 
-    async function deleteClient(event, clientId, hostname) {
-        event.stopPropagation();
-
-        const confirmed = confirm(
-            `Delete client "${hostname}"?\n\n` +
-            "This will permanently remove the client registration."
-        );
-
-        if (!confirmed) {
-            return;
+    // Shows the success banner after a redirect from a completed deletion
+    // (?deleted=1), matching the banner-on-redirect pattern already used
+    // by dashboard/repository.html instead of a native alert().
+    (function () {
+        const params = new URLSearchParams(window.location.search);
+        if (params.get("deleted") === "1") {
+            const alertBox = document.getElementById("deleteClientAlert");
+            if (alertBox) alertBox.classList.remove("d-none");
         }
+    })();
 
-        // Use the CSRF token already issued by the dashboard.
-        const csrfToken = document.cookie
-            .split("; ")
-            .find(row => row.startsWith("csrf_token="))
-            ?.split("=")[1];
+    // Delete Client Confirmation Modal (shared by all rows) - Bootstrap
+    // modal + inline error, replacing the native confirm()/alert() flow,
+    // matching the Repository module's Deactivate pattern.
+    (function () {
+        const modalEl = document.getElementById("deleteClientModal");
+        const modal = new bootstrap.Modal(modalEl);
+        const nameEl = document.getElementById("deleteClientHostname");
+        const errorBox = document.getElementById("deleteClientError");
+        const confirmBtn = document.getElementById("confirmDeleteClientBtn");
+        let pendingClientId = null;
 
-        try {
-            const response = await fetch(
-                `/api/admin/dashboard/clients/${clientId}`,
-                {
-                    method: "DELETE",
-                    headers: {
-                        "X-CSRF-Token": csrfToken || ""
+        document.querySelectorAll(".delete-client-btn").forEach(function (button) {
+            button.addEventListener("click", function () {
+                pendingClientId = button.dataset.clientId;
+                nameEl.textContent = button.dataset.hostname;
+                errorBox.classList.add("d-none");
+                errorBox.textContent = "";
+                confirmBtn.disabled = false;
+                confirmBtn.textContent = "Delete";
+                modal.show();
+            });
+        });
+
+        confirmBtn.addEventListener("click", async function () {
+            if (!pendingClientId) return;
+
+            const csrfToken = document.cookie
+                .split("; ")
+                .find(row => row.startsWith("csrf_token="))
+                ?.split("=")[1];
+
+            confirmBtn.disabled = true;
+            confirmBtn.textContent = "Deleting\u2026";
+
+            try {
+                const response = await fetch(
+                    `/api/admin/dashboard/clients/${pendingClientId}`,
+                    {
+                        method: "DELETE",
+                        headers: { "X-CSRF-Token": csrfToken || "" }
                     }
-                }
-            );
-
-            const result = await response.json();
-
-            if (!response.ok || !result.success) {
-                alert(
-                    result.message ||
-                    result.error ||
-                    "Failed to delete client."
                 );
-                return;
+
+                const result = await response.json().catch(() => null);
+
+                if (!response.ok || !(result && result.success)) {
+                    errorBox.textContent =
+                        (result && (result.message || result.error)) ||
+                        "Failed to delete client.";
+                    errorBox.classList.remove("d-none");
+                    confirmBtn.disabled = false;
+                    confirmBtn.textContent = "Delete";
+                    return;
+                }
+
+                window.location.href = "/dashboard/clients?deleted=1";
+            } catch (error) {
+                errorBox.textContent = "Unable to delete client. Please try again.";
+                errorBox.classList.remove("d-none");
+                confirmBtn.disabled = false;
+                confirmBtn.textContent = "Delete";
             }
-
-            // Refresh the client list after successful deletion.
-            window.location.href = "/dashboard/clients";
-
-        } catch (error) {
-            console.error("Client deletion failed:", error);
-            alert("Unable to delete client. Please try again.");
-        }
-    }
+        });
+    })();
 </script>
 {% endblock %}

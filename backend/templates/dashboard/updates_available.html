@@ -1,0 +1,129 @@
+{% extends "base.html" %}
+
+{% block title %}Updates Available{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h1 class="h3 mb-0">Updates Available</h1>
+        <p class="text-muted mb-0">Software with a pending update across every registered client (FR-007).</p>
+    </div>
+</div>
+
+<div class="row g-3 mb-3">
+    <div class="col-sm-6 col-lg-4">
+        <div class="card h-100 shadow-sm">
+            <div class="card-body">
+                <div class="text-muted text-uppercase small">Clients Affected</div>
+                <div class="display-6 text-warning">{{ summary.clients_affected }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-lg-4">
+        <div class="card h-100 shadow-sm">
+            <div class="card-body">
+                <div class="text-muted text-uppercase small">Distinct Titles</div>
+                <div class="display-6">{{ summary.distinct_titles }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-lg-4">
+        <div class="card h-100 shadow-sm">
+            <div class="card-body">
+                <div class="text-muted text-uppercase small">Total Pending Updates</div>
+                <div class="display-6">{{ summary.total }}</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card shadow-sm mb-3">
+    <div class="card-body">
+        <form method="get" action="/dashboard/updates" class="row g-2 align-items-end"
+      onsubmit="const client = this.querySelector('[name=client_id]'); if (client && !client.value) client.disabled = true;">
+            <div class="col-sm-5">
+                <label for="searchFilter" class="form-label small mb-1">Search (software name)</label>
+                <input
+                    type="text" id="searchFilter" name="search" class="form-control form-control-sm"
+                    placeholder="e.g. Chrome" value="{{ selected_search or '' }}"
+                >
+            </div>
+            <div class="col-sm-4">
+                <label for="clientFilter" class="form-label small mb-1">Client</label>
+                <select id="clientFilter" name="client_id" class="form-select form-select-sm">
+                    <option value="" {% if not selected_client_id %}selected{% endif %}>All clients</option>
+                    {% for client in clients %}
+                    <option
+                        value="{{ client.id }}"
+                        {% if selected_client_id and selected_client_id == client.id %}selected{% endif %}
+                    >
+                        {{ client.hostname }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-sm-2">
+                <button type="submit" class="btn btn-outline-primary btn-sm w-100">Filter</button>
+            </div>
+            <div class="col-sm-1 text-sm-end">
+                <a href="/dashboard/updates" class="btn btn-outline-secondary btn-sm">Clear</a>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card shadow-sm">
+    <div class="card-header">
+        Pending Updates
+        <span class="text-muted small">({{ rows|length }})</span>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-sm table-hover mb-0 align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>Client</th>
+                        <th>Software</th>
+                        <th>Installed Version</th>
+                        <th>Approved Version</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for row in rows %}
+                    <tr>
+                        <td>
+                            <a href="/dashboard/clients/{{ row.client_id }}">{{ row.client_hostname }}</a>
+                        </td>
+                        <td>
+                            {{ row.software_name }}
+                            {% if row.publisher %}<span class="text-muted small">&middot; {{ row.publisher }}</span>{% endif %}
+                        </td>
+                        <td class="small">{{ row.installed_version }}</td>
+                        <td class="small text-warning">{{ row.approved_version }}</td>
+                        <td>
+                            <a
+                                href="/dashboard/clients/{{ row.client_id }}/software?status=Update Available"
+                                class="btn btn-sm btn-outline-primary"
+                            >
+                                Review &amp; Update
+                            </a>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="5" class="text-center text-muted py-4">
+                            {% if selected_search or selected_client_id %}
+                            No pending updates match the current filters.
+                            {% else %}
+                            Every client is up to date. Nothing pending right now.
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

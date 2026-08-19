@@ -51,8 +51,8 @@
                     </li>
                     <li class="nav-item">
                         <a
-                            class="nav-link {% if request.url.path == '/dashboard/deployments' %}active{% endif %}"
-                            {% if request.url.path == '/dashboard/deployments' %}aria-current="page"{% endif %}
+                            class="nav-link {% if request.url.path.startswith('/dashboard/deployments') %}active{% endif %}"
+                            {% if request.url.path.startswith('/dashboard/deployments') %}aria-current="page"{% endif %}
                             href="/dashboard/deployments"
                         >Deployments</a>
                     </li>
@@ -63,7 +63,6 @@
                             href="/dashboard/audit-logs"
                         >Audit Logs</a>
                     </li>
-                    <!-- existing Audit Logs <li> stays exactly as-is, then add: -->
                     <li class="nav-item">
                         <a
                              class="nav-link {% if request.url.path.startswith('/dashboard/settings') %}active{% endif %}"

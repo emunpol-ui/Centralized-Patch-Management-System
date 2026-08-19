@@ -9,6 +9,7 @@
         <p class="text-muted mb-0">Installed software and update status (FR-007).</p>
     </div>
     <div>
+        <a href="/dashboard/updates" class="btn btn-outline-warning btn-sm">View Fleet-wide Updates</a>
         <a href="/dashboard/clients/{{ software.client_id }}" class="btn btn-outline-secondary btn-sm">&laquo; Back to Client</a>
     </div>
 </div>
@@ -17,43 +18,52 @@
 
 <div class="row g-3 mb-3">
     <div class="col-sm-6 col-lg-3">
-        <div class="card h-100 shadow-sm">
-            <div class="card-body">
-                <div class="text-muted text-uppercase small">Total Installed</div>
-                <div class="display-6">{{ software.summary.total }}</div>
+        <a href="/dashboard/clients/{{ software.client_id }}/software" class="text-decoration-none">
+            <div class="card h-100 shadow-sm">
+                <div class="card-body">
+                    <div class="text-muted text-uppercase small">Total Installed</div>
+                    <div class="display-6">{{ software.summary.total }}</div>
+                </div>
             </div>
-        </div>
+        </a>
     </div>
     <div class="col-sm-6 col-lg-3">
-        <div class="card h-100 shadow-sm">
-            <div class="card-body">
-                <div class="text-muted text-uppercase small">Up to Date</div>
-                <div class="display-6 text-success">{{ software.summary.up_to_date }}</div>
+        <a href="?status=Up to Date" class="text-decoration-none">
+            <div class="card h-100 shadow-sm">
+                <div class="card-body">
+                    <div class="text-muted text-uppercase small">Up to Date</div>
+                    <div class="display-6 text-success">{{ software.summary.up_to_date }}</div>
+                </div>
             </div>
-        </div>
+        </a>
     </div>
     <div class="col-sm-6 col-lg-3">
-        <div class="card h-100 shadow-sm">
-            <div class="card-body">
-                <div class="text-muted text-uppercase small">Update Available</div>
-                <div class="display-6 text-warning">{{ software.summary.update_available }}</div>
+        <a href="?status=Update Available" class="text-decoration-none">
+            <div class="card h-100 shadow-sm">
+                <div class="card-body">
+                    <div class="text-muted text-uppercase small">Update Available</div>
+                    <div class="display-6 text-warning">{{ software.summary.update_available }}</div>
+                </div>
             </div>
-        </div>
+        </a>
     </div>
     <div class="col-sm-6 col-lg-3">
-        <div class="card h-100 shadow-sm">
-            <div class="card-body">
-                <div class="text-muted text-uppercase small">Not Managed</div>
-                <div class="display-6 text-secondary">{{ software.summary.not_managed }}</div>
+        <a href="?status=Not Managed" class="text-decoration-none">
+            <div class="card h-100 shadow-sm">
+                <div class="card-body">
+                    <div class="text-muted text-uppercase small">Not Managed</div>
+                    <div class="display-6 text-secondary">{{ software.summary.not_managed }}</div>
+                </div>
             </div>
-        </div>
+        </a>
     </div>
 </div>
 
 <div class="card shadow-sm mb-3">
     <div class="card-body">
-        <form method="get" action="/dashboard/clients/{{ software.client_id }}/software" class="row g-2 align-items-end">
-            <div class="col-sm-5">
+        <form method="get" action="/dashboard/clients/{{ software.client_id }}/software" class="row g-2 align-items-end"
+      onsubmit="const status = this.querySelector('[name=status]'); if (status && !status.value) status.disabled = true;">
+            <div class="col-sm-4">
                 <label for="searchFilter" class="form-label small mb-1">Search (software name)</label>
                 <input
                     type="text" id="searchFilter" name="search" class="form-control form-control-sm"
@@ -67,11 +77,20 @@
                     placeholder="e.g. Google" value="{{ selected_publisher or '' }}"
                 >
             </div>
-            <div class="col-sm-2">
+            <div class="col-sm-3">
+                <label for="statusFilter" class="form-label small mb-1">Status</label>
+                <select id="statusFilter" name="status" class="form-select form-select-sm">
+                    <option value="" {% if not selected_status %}selected{% endif %}>All statuses</option>
+                    {% for s in statuses %}
+                    <option value="{{ s.value }}" {% if selected_status == s %}selected{% endif %}>{{ s.value }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-sm-1">
                 <button type="submit" class="btn btn-outline-primary btn-sm w-100">Filter</button>
             </div>
-            <div class="col-sm-2 text-sm-end">
-                <a href="/dashboard/clients/{{ software.client_id }}/software" class="btn btn-outline-secondary btn-sm">Clear filters</a>
+            <div class="col-sm-1 text-sm-end">
+                <a href="/dashboard/clients/{{ software.client_id }}/software" class="btn btn-outline-secondary btn-sm">Clear</a>
             </div>
         </form>
     </div>
@@ -141,7 +160,11 @@
                     {% else %}
                     <tr>
                         <td colspan="7" class="text-center text-muted py-4">
+                            {% if selected_search or selected_publisher or selected_status %}
+                            No installed software matches the current filters.
+                            {% else %}
                             No software inventory has been collected for this client yet.
+                            {% endif %}
                         </td>
                     </tr>
                     {% endfor %}

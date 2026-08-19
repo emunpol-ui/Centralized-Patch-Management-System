@@ -8,9 +8,12 @@
         <h1 class="h3 mb-0">Repository</h1>
         <p class="text-muted mb-0">Administrator-approved software installer packages (FR-006).</p>
     </div>
-    <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addPackageModal">
-        + Add Package
-    </button>
+    <div>
+        <a href="/dashboard/updates" class="btn btn-outline-warning btn-sm">Updates Available</a>
+        <button type="button" class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addPackageModal">
+            + Add Package
+        </button>
+    </div>
 </div>
 
 <div id="addPackageAlert" class="alert alert-success alert-dismissible fade show d-none" role="alert">
@@ -19,7 +22,7 @@
 </div>
 
 <div id="deactivatePackageAlert" class="alert alert-success alert-dismissible fade show d-none" role="alert">
-    Repository package deleted successfully. It is no longer available for new deployments.
+    Repository package deactivated successfully. It is no longer available for new deployments.
     <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
 </div>
 
@@ -155,7 +158,7 @@
                                 data-installer-type="{{ package.installer_type.value }}"
                                 data-file-size="{{ '{:,}'.format(package.file_size) }} bytes"
                             >
-                                Delete
+                                Deactivate
                             </button>
                             {% endif %}
                         </td>
@@ -177,12 +180,12 @@
     </div>
 </div>
 
-<!-- Delete/Deactivate Confirmation Modal (shared by all rows) -->
+<!-- Deactivate Confirmation Modal (shared by all rows) -->
 <div class="modal fade" id="deletePackageModal" tabindex="-1" aria-labelledby="deletePackageModalLabel" aria-hidden="true">
     <div class="modal-dialog">
         <div class="modal-content">
             <div class="modal-header">
-                <h5 class="modal-title" id="deletePackageModalLabel">Delete Repository Package?</h5>
+                <h5 class="modal-title" id="deletePackageModalLabel">Deactivate Repository Package?</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
@@ -196,7 +199,7 @@
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancel</button>
-                <button type="button" id="confirmDeletePackageBtn" class="btn btn-danger">Delete</button>
+                <button type="button" id="confirmDeletePackageBtn" class="btn btn-danger">Deactivate</button>
             </div>
         </div>
     </div>
@@ -281,7 +284,7 @@
     })();
 
     // Make each package row clickable (except the explicit "Details" link
-    // and the "Delete" button, which already handle their own clicks) -
+    // and the "Deactivate" button, which already handle their own clicks) -
     // same pattern already used by dashboard/clients.html (DASH-004), no
     // new frontend framework introduced.
     document.querySelectorAll("tr.repository-row").forEach(function (row) {
@@ -294,7 +297,7 @@
         });
     });
 
-    // Row-level Delete (deactivate) action. Reuses the exact same
+    // Row-level Deactivate action. Reuses the exact same
     // POST /api/admin/repository/packages/{package_id}/deactivate endpoint
     // (FR-017/REP-002) and CSRF-cookie pattern already used on
     // dashboard/repository_detail.html - no second deletion mechanism is
@@ -322,7 +325,7 @@
                 errorBox.classList.add("d-none");
                 errorBox.textContent = "";
                 confirmBtn.disabled = false;
-                confirmBtn.textContent = "Delete";
+                confirmBtn.textContent = "Deactivate";
                 modal.show();
             });
         });
@@ -332,7 +335,7 @@
                 return;
             }
             confirmBtn.disabled = true;
-            confirmBtn.textContent = "Deleting\u2026";
+            confirmBtn.textContent = "Deactivating\u2026";
 
             try {
                 const response = await fetch(
@@ -356,15 +359,15 @@
                 });
                 errorBox.textContent =
                     (payload && (payload.message || payload.error || payload.detail)) ||
-                    "Failed to delete the package. Please try again.";
+                    "Failed to deactivate the package. Please try again.";
                 errorBox.classList.remove("d-none");
                 confirmBtn.disabled = false;
-                confirmBtn.textContent = "Delete";
+                confirmBtn.textContent = "Deactivate";
             } catch (err) {
-                errorBox.textContent = "Failed to delete the package. Please try again.";
+                errorBox.textContent = "Failed to deactivate the package. Please try again.";
                 errorBox.classList.remove("d-none");
                 confirmBtn.disabled = false;
-                confirmBtn.textContent = "Delete";
+                confirmBtn.textContent = "Deactivate";
             }
         });
     })();

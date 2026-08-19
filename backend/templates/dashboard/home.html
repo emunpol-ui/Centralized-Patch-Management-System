@@ -18,36 +18,44 @@
 
 <div class="row g-3 mb-4">
     <div class="col-sm-6 col-lg-3">
-        <div class="card h-100 shadow-sm">
-            <div class="card-body">
-                <div class="text-muted text-uppercase small">Registered Clients</div>
-                <div class="display-6">{{ overview.clients.total }}</div>
+        <a href="/dashboard/clients" class="text-decoration-none">
+            <div class="card h-100 shadow-sm dashboard-card">
+                <div class="card-body">
+                    <div class="text-muted text-uppercase small">Registered Clients</div>
+                    <div class="display-6">{{ overview.clients.total }}</div>
+                </div>
             </div>
-        </div>
+        </a>
     </div>
     <div class="col-sm-6 col-lg-3">
-        <div class="card h-100 shadow-sm">
-            <div class="card-body">
-                <div class="text-muted text-uppercase small">Deployment Batches</div>
-                <div class="display-6">{{ overview.deployments.total_batches }}</div>
+        <a href="/dashboard/deployments" class="text-decoration-none">
+            <div class="card h-100 shadow-sm dashboard-card">
+                <div class="card-body">
+                    <div class="text-muted text-uppercase small">Deployment Batches</div>
+                    <div class="display-6">{{ overview.deployments.total_batches }}</div>
+                </div>
             </div>
-        </div>
+        </a>
     </div>
     <div class="col-sm-6 col-lg-3">
-        <div class="card h-100 shadow-sm">
-            <div class="card-body">
-                <div class="text-muted text-uppercase small">Active Deployments</div>
-                <div class="display-6">{{ overview.deployments.active }}</div>
+        <a href="/dashboard/deployments?status=Pending" class="text-decoration-none">
+            <div class="card h-100 shadow-sm dashboard-card">
+                <div class="card-body">
+                    <div class="text-muted text-uppercase small">Active Deployments</div>
+                    <div class="display-6">{{ overview.deployments.active }}</div>
+                </div>
             </div>
-        </div>
+        </a>
     </div>
     <div class="col-sm-6 col-lg-3">
-        <div class="card h-100 shadow-sm">
-            <div class="card-body">
-                <div class="text-muted text-uppercase small">Repository Packages</div>
-                <div class="display-6">{{ overview.repository.total }}</div>
+        <a href="/dashboard/repository" class="text-decoration-none">
+            <div class="card h-100 shadow-sm dashboard-card">
+                <div class="card-body">
+                    <div class="text-muted text-uppercase small">Repository Packages</div>
+                    <div class="display-6">{{ overview.repository.total }}</div>
+                </div>
             </div>
-        </div>
+        </a>
     </div>
 </div>
 
@@ -61,19 +69,27 @@
                     <tbody>
                         <tr>
                             <td>Total</td>
-                            <td class="text-end fw-semibold">{{ overview.clients.total }}</td>
+                            <td class="text-end fw-semibold">
+                                <a href="/dashboard/clients" class="text-decoration-none">{{ overview.clients.total }}</a>
+                            </td>
                         </tr>
                         <tr>
                             <td><span class="badge text-bg-success">Online</span></td>
-                            <td class="text-end">{{ overview.clients.online }}</td>
+                            <td class="text-end">
+                                <a href="/dashboard/clients?status=Online" class="text-decoration-none">{{ overview.clients.online }}</a>
+                            </td>
                         </tr>
                         <tr>
                             <td><span class="badge text-bg-secondary">Offline</span></td>
-                            <td class="text-end">{{ overview.clients.offline }}</td>
+                            <td class="text-end">
+                                <a href="/dashboard/clients?status=Offline" class="text-decoration-none">{{ overview.clients.offline }}</a>
+                            </td>
                         </tr>
                         <tr>
                             <td><span class="badge text-bg-light text-dark border">Unknown</span></td>
-                            <td class="text-end">{{ overview.clients.unknown }}</td>
+                            <td class="text-end">
+                                <a href="/dashboard/clients?status=Unknown" class="text-decoration-none">{{ overview.clients.unknown }}</a>
+                            </td>
                         </tr>
                     </tbody>
                 </table>
@@ -90,35 +106,51 @@
                     <tbody>
                         <tr>
                             <td>Batches</td>
-                            <td class="text-end fw-semibold">{{ overview.deployments.total_batches }}</td>
+                            <td class="text-end fw-semibold">
+                                <a href="/dashboard/deployments" class="text-decoration-none">{{ overview.deployments.total_batches }}</a>
+                            </td>
                         </tr>
                         <tr>
                             <td>Targets (total)</td>
-                            <td class="text-end fw-semibold">{{ overview.deployments.total_targets }}</td>
+                            <td class="text-end fw-semibold">
+                                <a href="/dashboard/deployments" class="text-decoration-none">{{ overview.deployments.total_targets }}</a>
+                            </td>
                         </tr>
                         <tr>
                             <td><span class="badge text-bg-warning text-dark">Pending</span></td>
-                            <td class="text-end">{{ overview.deployments.pending }}</td>
+                            <td class="text-end">
+                                <a href="/dashboard/deployments?status=Pending" class="text-decoration-none">{{ overview.deployments.pending }}</a>
+                            </td>
                         </tr>
                         <tr>
                             <td><span class="badge text-bg-info text-dark">Downloading</span></td>
-                            <td class="text-end">{{ overview.deployments.downloading }}</td>
+                            <td class="text-end">
+                                <a href="/dashboard/deployments?status=Downloading" class="text-decoration-none">{{ overview.deployments.downloading }}</a>
+                            </td>
                         </tr>
                         <tr>
                             <td><span class="badge text-bg-info text-dark">Installing</span></td>
-                            <td class="text-end">{{ overview.deployments.installing }}</td>
+                            <td class="text-end">
+                                <a href="/dashboard/deployments?status=Installing" class="text-decoration-none">{{ overview.deployments.installing }}</a>
+                            </td>
                         </tr>
                         <tr>
                             <td><span class="badge text-bg-success">Completed</span></td>
-                            <td class="text-end">{{ overview.deployments.completed }}</td>
+                            <td class="text-end">
+                                <a href="/dashboard/deployments?status=Completed" class="text-decoration-none">{{ overview.deployments.completed }}</a>
+                            </td>
                         </tr>
                         <tr>
                             <td><span class="badge text-bg-danger">Failed</span></td>
-                            <td class="text-end">{{ overview.deployments.failed }}</td>
+                            <td class="text-end">
+                                <a href="/dashboard/deployments?status=Failed" class="text-decoration-none">{{ overview.deployments.failed }}</a>
+                            </td>
                         </tr>
                         <tr>
                             <td><span class="badge text-bg-secondary">Cancelled</span></td>
-                            <td class="text-end">{{ overview.deployments.cancelled }}</td>
+                            <td class="text-end">
+                                <a href="/dashboard/deployments?status=Cancelled" class="text-decoration-none">{{ overview.deployments.cancelled }}</a>
+                            </td>
                         </tr>
                     </tbody>
                 </table>
@@ -135,15 +167,21 @@
                     <tbody>
                         <tr>
                             <td>Total Packages</td>
-                            <td class="text-end fw-semibold">{{ overview.repository.total }}</td>
+                            <td class="text-end fw-semibold">
+                                <a href="/dashboard/repository" class="text-decoration-none">{{ overview.repository.total }}</a>
+                            </td>
                         </tr>
                         <tr>
                             <td><span class="badge text-bg-success">Approved</span></td>
-                            <td class="text-end">{{ overview.repository.approved }}</td>
+                            <td class="text-end">
+                                <a href="/dashboard/repository?status=Approved" class="text-decoration-none">{{ overview.repository.approved }}</a>
+                            </td>
                         </tr>
                         <tr>
                             <td><span class="badge text-bg-secondary">Inactive</span></td>
-                            <td class="text-end">{{ overview.repository.inactive }}</td>
+                            <td class="text-end">
+                                <a href="/dashboard/repository?status=Inactive" class="text-decoration-none">{{ overview.repository.inactive }}</a>
+                            </td>
                         </tr>
                     </tbody>
                 </table>
@@ -151,4 +189,18 @@
         </div>
     </div>
 </div>
+{% endblock %}
+
+{% block extra_head %}
+<style>
+    /* Give the four top-level stat cards a hover affordance now that
+       they're clickable, without touching global dashboard.css. */
+    .dashboard-card {
+        transition: transform 0.1s ease-in-out, box-shadow 0.1s ease-in-out;
+    }
+    .dashboard-card:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.1) !important;
+    }
+</style>
 {% endblock %}

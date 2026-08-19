@@ -1,13 +1,17 @@
 {% extends "base.html" %}
 
-{% block title %}Deployment Monitoring{% endblock %}
+{% block title %}Deployment Batch {{ batch.deployment_id }}{% endblock %}
 
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4">
     <div>
-        <h1 class="h3 mb-0">Deployment Monitoring</h1>
-        <p class="text-muted mb-0">Deployment status breakdown and recent deployment targets.</p>
+        <h1 class="h3 mb-0">Deployment Batch</h1>
+        <p class="text-muted mb-0">
+            <code>{{ batch.deployment_id }}</code>
+            &middot; started {{ batch.created_at.strftime("%Y-%m-%d %H:%M:%S UTC") }}
+        </p>
     </div>
+    <a href="/dashboard/deployments" class="btn btn-outline-secondary btn-sm">&laquo; Back to Deployments</a>
 </div>
 
 <div id="cancelDeploymentAlert" class="alert alert-success alert-dismissible fade show d-none" role="alert">
@@ -24,24 +28,16 @@
     <div class="col-sm-6 col-lg-3">
         <div class="card h-100 shadow-sm">
             <div class="card-body">
-                <div class="text-muted text-uppercase small">Deployment Batches</div>
-                <div class="display-6">{{ monitoring.summary.total_batches }}</div>
+                <div class="text-muted text-uppercase small">Targets in Batch</div>
+                <div class="display-6">{{ batch.summary.total }}</div>
             </div>
         </div>
     </div>
     <div class="col-sm-6 col-lg-3">
         <div class="card h-100 shadow-sm">
             <div class="card-body">
-                <div class="text-muted text-uppercase small">Total Targets</div>
-                <div class="display-6">{{ monitoring.summary.total_targets }}</div>
-            </div>
-        </div>
-    </div>
-    <div class="col-sm-6 col-lg-3">
-        <div class="card h-100 shadow-sm">
-            <div class="card-body">
-                <div class="text-muted text-uppercase small">Active</div>
-                <div class="display-6">{{ monitoring.summary.active }}</div>
+                <div class="text-muted text-uppercase small">Completed</div>
+                <div class="display-6 text-success">{{ batch.summary.completed }}</div>
             </div>
         </div>
     </div>
@@ -49,92 +45,36 @@
         <div class="card h-100 shadow-sm">
             <div class="card-body">
                 <div class="text-muted text-uppercase small">Failed</div>
-                <div class="display-6">{{ monitoring.summary.failed }}</div>
+                <div class="display-6 text-danger">{{ batch.summary.failed }}</div>
+            </div>
+        </div>
+    </div>
+    <div class="col-sm-6 col-lg-3">
+        <div class="card h-100 shadow-sm">
+            <div class="card-body">
+                <div class="text-muted text-uppercase small">In Progress</div>
+                <div class="display-6 text-info">{{ batch.summary.downloading + batch.summary.installing }}</div>
             </div>
         </div>
     </div>
 </div>
 
 <div class="card shadow-sm mb-3">
-    <div class="card-header">Deployment Status Breakdown</div>
+    <div class="card-header">Batch Status Breakdown</div>
     <div class="card-body">
-        <span class="badge text-bg-warning text-dark me-1">Pending: {{ monitoring.summary.pending }}</span>
-        <span class="badge text-bg-info text-dark me-1">Downloading: {{ monitoring.summary.downloading }}</span>
-        <span class="badge text-bg-info text-dark me-1">Installing: {{ monitoring.summary.installing }}</span>
-        <span class="badge text-bg-success me-1">Completed: {{ monitoring.summary.completed }}</span>
-        <span class="badge text-bg-danger me-1">Failed: {{ monitoring.summary.failed }}</span>
-        <span class="badge text-bg-secondary me-1">Cancelled: {{ monitoring.summary.cancelled }}</span>
-    </div>
-</div>
-
-<div class="card shadow-sm mb-3">
-    <div class="card-body">
-        <form method="get" action="/dashboard/deployments" class="row g-2 align-items-end"
-      onsubmit="this.querySelectorAll('select, input[type=date]').forEach(function(field) {
-          if (field.value === '') {
-              field.removeAttribute('name');
-          }
-      });">
-            <div class="col-sm-2">
-                <label for="statusFilter" class="form-label small mb-1">Status</label>
-                <select id="statusFilter" name="status" class="form-select form-select-sm">
-                    <option value="" {% if not selected_status %}selected{% endif %}>All statuses</option>
-                    {% for s in statuses %}
-                    <option value="{{ s.value }}" {% if selected_status == s %}selected{% endif %}>
-                        {{ s.name.replace('_', ' ').title() }}
-                    </option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="col-sm-3">
-                <label for="clientFilter" class="form-label small mb-1">Client</label>
-                <select id="clientFilter" name="client_id" class="form-select form-select-sm">
-                    <option value="" {% if not selected_client_id %}selected{% endif %}>All clients</option>
-                    {% for client in clients %}
-                    <option
-                        value="{{ client.id }}"
-                        {% if selected_client_id and selected_client_id == client.id %}selected{% endif %}
-                    >
-                        {{ client.hostname }}
-                    </option>
-                    {% endfor %}
-                </select>
-            </div>
-            <div class="col-sm-2">
-                <label for="dateFrom" class="form-label small mb-1">From</label>
-                <input
-                    type="date" id="dateFrom" name="date_from" class="form-control form-control-sm"
-                    value="{{ selected_date_from.isoformat() if selected_date_from else '' }}"
-                >
-            </div>
-            <div class="col-sm-2">
-                <label for="dateTo" class="form-label small mb-1">To</label>
-                <input
-                    type="date" id="dateTo" name="date_to" class="form-control form-control-sm"
-                    value="{{ selected_date_to.isoformat() if selected_date_to else '' }}"
-                >
-            </div>
-            <div class="col-sm-3">
-                <label for="searchFilter" class="form-label small mb-1">Search (client / software)</label>
-                <input
-                    type="text" id="searchFilter" name="search" class="form-control form-control-sm"
-                    placeholder="e.g. PC-LAB or Chrome" value="{{ selected_search or '' }}"
-                >
-            </div>
-            <div class="col-sm-3 mt-2">
-                <button type="submit" class="btn btn-outline-primary btn-sm w-100">Filter</button>
-            </div>
-            <div class="col-sm-3 mt-2">
-                <a href="/dashboard/deployments" class="btn btn-outline-secondary btn-sm w-100">Clear filters</a>
-            </div>
-        </form>
+        <span class="badge text-bg-warning text-dark me-1">Pending: {{ batch.summary.pending }}</span>
+        <span class="badge text-bg-info text-dark me-1">Downloading: {{ batch.summary.downloading }}</span>
+        <span class="badge text-bg-info text-dark me-1">Installing: {{ batch.summary.installing }}</span>
+        <span class="badge text-bg-success me-1">Completed: {{ batch.summary.completed }}</span>
+        <span class="badge text-bg-danger me-1">Failed: {{ batch.summary.failed }}</span>
+        <span class="badge text-bg-secondary me-1">Cancelled: {{ batch.summary.cancelled }}</span>
     </div>
 </div>
 
 <div class="card shadow-sm">
     <div class="card-header">
-        Deployment Targets
-        <span class="text-muted small">(most recent {{ limit }})</span>
+        Targets in This Batch
+        <span class="text-muted small">({{ rows|length }})</span>
     </div>
     <div class="card-body p-0">
         <div class="table-responsive">
@@ -148,7 +88,6 @@
                         <th>Completed</th>
                         <th>Exit Code</th>
                         <th>Error</th>
-                        <th>Batch</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
@@ -156,7 +95,7 @@
                     {% for row in rows %}
                     <tr>
                         <td>
-                            {{ row.target.client_hostname }}
+                            <a href="/dashboard/clients/{{ row.target.client_id }}">{{ row.target.client_hostname }}</a>
                             <div class="text-muted small">{{ row.target.client_ip_address }}</div>
                         </td>
                         <td>{{ row.target.software_name }} <span class="text-muted">{{ row.target.software_version }}</span></td>
@@ -173,11 +112,6 @@
                             {% if row.target.exit_code is not none %}{{ row.target.exit_code }}{% else %}&mdash;{% endif %}
                         </td>
                         <td class="small text-danger">{{ row.target.error_message or "" }}</td>
-                        <td class="small">
-                            <a href="/dashboard/deployments/batches/{{ row.target.deployment_id }}" class="text-muted">
-                                {{ row.target.deployment_id }}
-                            </a>
-                        </td>
                         <td class="text-end">
                             {% if row.target.status.name == "PENDING" %}
                                 <button
@@ -212,12 +146,8 @@
                     </tr>
                     {% else %}
                     <tr>
-                        <td colspan="9" class="text-center text-muted py-4">
-                            {% if selected_status or selected_client_id or selected_date_from or selected_date_to or selected_search %}
-                            No deployment targets match the current filters.
-                            {% else %}
-                            No deployments have been created yet.
-                            {% endif %}
+                        <td colspan="8" class="text-center text-muted py-4">
+                            No targets found for this batch.
                         </td>
                     </tr>
                     {% endfor %}
@@ -270,8 +200,8 @@
 </div>
 
 <script>
-    // Identical action-and-banner wiring to dashboard/deployments/batch_detail.html
-    // so Cancel/Retry behave the same whether reached from the flat target
+    // Identical action-and-banner wiring to dashboard/deployments.html so
+    // Cancel/Retry behave the same whether reached from the flat target
     // list or from a single batch's detail page.
     (function () {
         const params = new URLSearchParams(window.location.search);

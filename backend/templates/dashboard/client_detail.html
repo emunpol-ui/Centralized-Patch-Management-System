@@ -125,7 +125,11 @@
                             {% endif %}
                         </td>
                         <td class="small text-danger">{{ row.target.error_message or "" }}</td>
-                        <td class="small text-muted">{{ row.target.deployment_id }}</td>
+                        <td class="small">
+                            <a href="/dashboard/deployments/batches/{{ row.target.deployment_id }}" class="text-muted">
+                                {{ row.target.deployment_id }}
+                            </a>
+                        </td>
                     </tr>
                     {% else %}
                     <tr>

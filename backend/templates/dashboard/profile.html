@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+
+{% block title %}My Profile{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h1 class="h3 mb-0">My Profile</h1>
+        <p class="text-muted mb-0">Account details and password management.</p>
+    </div>
+    <a href="/dashboard/settings" class="btn btn-outline-secondary btn-sm">&laquo; Back to Settings</a>
+</div>
+
+{% if saved %}
+<div class="alert alert-success alert-dismissible fade show" role="alert">
+    Password changed successfully.
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+</div>
+{% endif %}
+
+<div class="row g-3">
+    <div class="col-lg-6">
+        <div class="card shadow-sm mb-3">
+            <div class="card-header">Account</div>
+            <div class="card-body">
+                <table class="table table-sm mb-0">
+                    <tbody>
+                        <tr>
+                            <td>Username</td>
+                            <td class="text-end fw-semibold">{{ administrator.username }}</td>
+                        </tr>
+                        {% if administrator.email %}
+                        <tr>
+                            <td>Email</td>
+                            <td class="text-end">{{ administrator.email }}</td>
+                        </tr>
+                        {% endif %}
+                        {% if administrator.created_at %}
+                        <tr>
+                            <td>Account Created</td>
+                            <td class="text-end small">{{ administrator.created_at.strftime("%Y-%m-%d %H:%M:%S UTC") }}</td>
+                        </tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="card shadow-sm mb-3">
+            <div class="card-header">Change Password</div>
+            <div class="card-body">
+                <div id="passwordError" class="alert alert-danger d-none" role="alert"></div>
+                <form id="passwordForm">
+                    <div class="mb-3">
+                        <label for="currentPassword" class="form-label">Current Password</label>
+                        <input type="password" class="form-control" id="currentPassword" name="current_password" required>
+                    </div>
+                    <div class="mb-3">
+                        <label for="newPassword" class="form-label">New Password</label>
+                        <input type="password" class="form-control" id="newPassword" name="new_password" minlength="8" required>
+                        <div class="form-text">Minimum 8 characters.</div>
+                    </div>
+                    <div class="mb-3">
+                        <label for="confirmPassword" class="form-label">Confirm New Password</label>
+                        <input type="password" class="form-control" id="confirmPassword" name="confirm_password" minlength="8" required>
+                    </div>
+                    <button type="submit" id="changePasswordButton" class="btn btn-primary">Change Password</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+document.addEventListener("DOMContentLoaded", function () {
+    const form = document.getElementById("passwordForm");
+    const errorBox = document.getElementById("passwordError");
+    const submitButton = document.getElementById("changePasswordButton");
+
+    function getCookie(name) {
+        const match = document.cookie.match(new RegExp("(^| )" + name + "=([^;]+)"));
+        return match ? decodeURIComponent(match[2]) : null;
+    }
+
+    // Endpoint follows the same /api/admin/... convention and CSRF-cookie
+    // pattern already used by dashboard/settings.html; its existence on
+    // the FastAPI side is not verifiable from templates alone.
+    form.addEventListener("submit", async function (event) {
+        event.preventDefault();
+        errorBox.classList.add("d-none");
+        errorBox.textContent = "";
+
+        if (form.new_password.value !== form.confirm_password.value) {
+            errorBox.textContent = "New password and confirmation do not match.";
+            errorBox.classList.remove("d-none");
+            return;
+        }
+
+        submitButton.disabled = true;
+        submitButton.textContent = "Changing\u2026";
+
+        try {
+            const response = await fetch("/api/admin/profile/password", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "X-CSRF-Token": getCookie("csrf_token") || "",
+                },
+                credentials: "same-origin",
+                body: JSON.stringify({
+                    current_password: form.current_password.value,
+                    new_password: form.new_password.value,
+                }),
+            });
+
+            const body = await response.json().catch(() => null);
+
+            if (!response.ok) {
+                errorBox.textContent = (body && (body.error || body.message)) || "Failed to change password.";
+                errorBox.classList.remove("d-none");
+                submitButton.disabled = false;
+                submitButton.textContent = "Change Password";
+                return;
+            }
+
+            window.location.href = "/dashboard/settings/profile?saved=1";
+        } catch (err) {
+            errorBox.textContent = "A network error occurred while changing the password.";
+            errorBox.classList.remove("d-none");
+            submitButton.disabled = false;
+            submitButton.textContent = "Change Password";
+        }
+    });
+});
+</script>
+{% endblock %}
